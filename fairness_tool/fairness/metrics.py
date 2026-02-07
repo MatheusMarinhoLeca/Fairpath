@@ -78,9 +78,13 @@ def compute_group_fairness(df, target_col, protected_attribute, privileged_group
         privileged_groups=privileged_groups
     )
     
+    # Replace NaN results with 0.0 (happens when subgroups are too small)
+    parity_diff = metric.mean_difference()
+    disparate_impact = metric.disparate_impact()
+    
     results = {
-        "Demographic Parity (Stat. Parity Diff.)": metric.mean_difference(),
-        "Demographic Parity (Disparate Impact)": metric.disparate_impact()
+        "Demographic Parity (Stat. Parity Diff.)": 0.0 if np.isnan(parity_diff) else parity_diff,
+        "Demographic Parity (Disparate Impact)": 1.0 if np.isnan(disparate_impact) else disparate_impact
     }
     
     return results
@@ -122,9 +126,13 @@ def compute_classification_fairness(df_true, df_pred, target_col, protected_attr
         privileged_groups=privileged_groups
     )
     
+    # Replace NaN results with 0.0 (happens when subgroups are too small)
+    eq_opp_diff = metric.equal_opportunity_difference()
+    avg_odds_diff = metric.average_odds_difference()
+    
     results = {
-        "Equalized Odds (Eq. Opp. Diff.)": metric.equal_opportunity_difference(),
-        "Equalized Odds (Avg. Odds Diff.)": metric.average_odds_difference()
+        "Equalized Odds (Eq. Opp. Diff.)": 0.0 if np.isnan(eq_opp_diff) else eq_opp_diff,
+        "Equalized Odds (Avg. Odds Diff.)": 0.0 if np.isnan(avg_odds_diff) else avg_odds_diff
     }
     
     return results

@@ -28,10 +28,17 @@ def get_user_confirmation(prompt="Are you sure?"):
             return False
         print("Please enter 'y' or 'n'.")
 
-def get_user_input(prompt, validator=None, allow_empty=False):
+def get_user_input(prompt, validator=None, allow_empty=False, default=None):
+    full_prompt = f"{prompt}"
+    if default is not None:
+        full_prompt += f" [Default: {default}]"
+    
     while True:
-        user_input = input(f"{prompt}: ").strip()
+        user_input = input(f"{full_prompt}: ").strip()
+        
         if not user_input:
+            if default is not None:
+                return default
             if allow_empty:
                 return user_input
             print("Input cannot be empty.")

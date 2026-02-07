@@ -1,10 +1,38 @@
 import pandas as pd
 import numpy as np
+import warnings
+import logging
+import os
+import sys
+import contextlib
 from imblearn.over_sampling import SMOTE
 from sklearn.linear_model import LogisticRegression
 from sdv.single_table import GaussianCopulaSynthesizer
-from sdv.metadata import SingleTableMetadata
+from sdv.metadata import Metadata
 from sdv.sampling import Condition
+
+@contextlib.contextmanager
+def silence_output():
+    """
+    Forcefully silence all stdout and stderr, including C-level calls 
+    and diagnostic events from libraries like SDV.
+    """
+    # Open devnull
+    null_fds = [os.open(os.devnull, os.O_RDWR) for _ in range(2)]
+    # Save original fds
+    save_fds = [os.dup(1), os.dup(2)]
+    try:
+        # Redirect stdout/stderr to devnull
+        os.dup2(null_fds[0], 1)
+        os.dup2(null_fds[1], 2)
+        yield
+    finally:
+        # Restore original fds
+        os.dup2(save_fds[0], 1)
+        os.dup2(save_fds[1], 2)
+        # Close temp fds
+        for fd in null_fds + save_fds:
+            os.close(fd)
 
 def mitigate_resampling(X, y, sensitive_col, strategy='oversample'):
     """
@@ -60,33 +88,27 @@ def mitigate_relabeling(df, target_col, sensitive_col, privileged_group, unprivi
     """
     Fairness-aware Relabeling (Massaging).
     Identifies samples near the decision boundary and flips their labels 
-    only as needed to improve statistical parity.
-    1. Rank unprivileged samples with Y=0 by probability of being Y=1.
-    2. Rank privileged samples with Y=1 by probability of being Y=0.
-    3. Flip labels for the top candidates until parity is improved.
+    to move both groups toward the global average positive rate.
     """
     df_work = df.copy()
     
     # Train a simple ranker
     if features_to_use is not None:
-        X = df_work[features_to_use]
-        # Ensure target is not in X, though features_to_use shouldn't have it ideally
+        X = df_work[[f for f in features_to_use if f in df_work.columns]]
         if target_col in X.columns:
             X = X.drop(columns=[target_col])
     else:
         X = df_work.drop(columns=[target_col])
         
-    # Ensure numeric
+    # Ensure numeric for ranking
     X_num = X.select_dtypes(include=[np.number])
     y = df_work[target_col]
     
-    ranker = LogisticRegression()
+    ranker = LogisticRegression(max_iter=1000)
     ranker.fit(X_num, y)
     probs = ranker.predict_proba(X_num)[:, 1]
     df_work['_prob'] = probs
     
-    # Calculate how many flips are needed for Statistical Parity
-    # P(Y=1|unprivileged) should = P(Y=1|privileged)
     if isinstance(unprivileged_group, list):
         unpriv_mask = df_work[sensitive_col].isin(unprivileged_group)
     else:
@@ -101,20 +123,45 @@ def mitigate_relabeling(df, target_col, sensitive_col, privileged_group, unprivi
     
     current_unpriv_pos = df_work[unpriv_mask][target_col].sum()
     target_unpriv_pos = int(n_unpriv * target_rate)
-    num_to_flip_up = max(0, target_unpriv_pos - current_unpriv_pos)
     
     current_priv_pos = df_work[priv_mask][target_col].sum()
     target_priv_pos = int(n_priv * target_rate)
-    num_to_flip_down = max(0, current_priv_pos - target_priv_pos)
+
+    # UNPRIVILEGED adjustment
+    flips_up = 0
+    flips_down = 0
+    if current_unpriv_pos < target_unpriv_pos:
+        # Increase positives in unprivileged
+        num_to_flip = int(target_unpriv_pos - current_unpriv_pos)
+        to_flip = df_work[unpriv_mask & (df_work[target_col] == 0)].nlargest(num_to_flip, '_prob').index
+        df_work.loc[to_flip, target_col] = 1
+        flips_up += len(to_flip)
+    elif current_unpriv_pos > target_unpriv_pos:
+        # Decrease positives in unprivileged
+        num_to_flip = int(current_unpriv_pos - target_unpriv_pos)
+        to_flip = df_work[unpriv_mask & (df_work[target_col] == 1)].nsmallest(num_to_flip, '_prob').index
+        df_work.loc[to_flip, target_col] = 0
+        flips_down += len(to_flip)
+
+    # PRIVILEGED adjustment
+    if current_priv_pos > target_priv_pos:
+        # Decrease positives in privileged
+        num_to_flip = int(current_priv_pos - target_priv_pos)
+        to_flip = df_work[priv_mask & (df_work[target_col] == 1)].nsmallest(num_to_flip, '_prob').index
+        df_work.loc[to_flip, target_col] = 0
+        flips_down += len(to_flip)
+    elif current_priv_pos < target_priv_pos:
+        # Increase positives in privileged
+        num_to_flip = int(target_priv_pos - current_priv_pos)
+        to_flip = df_work[priv_mask & (df_work[target_col] == 0)].nlargest(num_to_flip, '_prob').index
+        df_work.loc[to_flip, target_col] = 1
+        flips_up += len(to_flip)
     
-    # Flip unprivileged 0 -> 1 (those with highest prob of being 1)
-    to_flip_up = df_work[unpriv_mask & (df_work[target_col] == 0)].nlargest(num_to_flip_up, '_prob').index
-    df_work.loc[to_flip_up, target_col] = 1
-    
-    # Flip privileged 1 -> 0 (those with lowest prob of being 1)
-    to_flip_down = df_work[priv_mask & (df_work[target_col] == 1)].nsmallest(num_to_flip_down, '_prob').index
-    df_work.loc[to_flip_down, target_col] = 0
-    
+    if flips_up + flips_down > 0:
+        print(f"✔ Relabeling successful: Flipped {flips_up} labels to 1 and {flips_down} labels to 0.")
+    else:
+        print("✔ Relabeling: No changes needed (dataset already balanced).")
+        
     return df_work.drop(columns=[target_col, '_prob']), df_work[target_col]
 
 def mitigate_synthetic(df, target_col, sensitive_col, method='smote'):
@@ -147,128 +194,66 @@ def _mitigate_synthetic_smote(df, target_col, sensitive_col):
     X_res, y_combined_res = smote.fit_resample(X, y_combined)
     
     # Extract original target from combined label
-    y_res = y_combined_res.apply(lambda x: int(x.split('_')[1]))
+    # Using rsplit('_', 1) to correctly handle cases where the sensitive attribute value itself contains an underscore
+    # Using float() before int() to handle strings like '1.0'
+    y_res = y_combined_res.apply(lambda x: int(float(x.rsplit('_', 1)[1])))
     
     return X_res, y_res
 
 def _mitigate_synthetic_sdv(df, target_col, sensitive_col):
-
     """
-
     Conditioned synthetic generation using SDV GaussianCopulaSynthesizer.
-
     """
-
-    # Ensure standard types for SDV and metadata detection
-
-    df_work = df.copy()
-
+    print("Training synthetic generator (this may take a minute)...")
     
-
-    metadata = SingleTableMetadata()
-
-    metadata.detect_from_dataframe(df_work)
-
+    # Suppress all library outputs (SDV, Copulas, RDT, etc.)
+    logging.getLogger('sdv').setLevel(logging.ERROR)
+    logging.getLogger('copulas').setLevel(logging.ERROR)
+    logging.getLogger('rdt').setLevel(logging.ERROR)
     
-
-    # GaussianCopula is robust for general tabular data
-
-    synthesizer = GaussianCopulaSynthesizer(metadata)
-
-    synthesizer.fit(df_work)
-
-    
-
-    # Goal: Equalize selection rates across sensitive groups.
-
-    # We upscale subgroups to reach demographic parity relative to the largest group.
-
-    total_per_a = df_work.groupby(sensitive_col).size()
-
-    max_total = int(total_per_a.max())
-
-    target_pos_rate = float(df_work[target_col].mean())
-
-    
-
-    all_samples = [df_work]
-
-    
-
-    for a_val in df_work[sensitive_col].unique():
-
-        # Calculate target counts for this group to reach max_total size
-
-        target_n_pos = int(round(max_total * target_pos_rate))
-
-        target_n_neg = int(max_total - target_n_pos)
-
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore")
         
-
-        group_a = df_work[df_work[sensitive_col] == a_val]
-
-        curr_pos = int((group_a[target_col] == 1).sum())
-
-        curr_neg = int((group_a[target_col] == 0).sum())
-
-        
-
-        diff_pos = int(target_n_pos - curr_pos)
-
-        diff_neg = int(target_n_neg - curr_neg)
-
-        
-
-        conditions = []
-
-        # Standardize a_val to prevent type issues with SDV/Numpy
-
-        a_val_std = a_val.item() if hasattr(a_val, 'item') else a_val
-
-        
-
-        if diff_pos > 0:
-
-            conditions.append(Condition(
-
-                num_rows=diff_pos,
-
-                column_values={sensitive_col: a_val_std, target_col: 1}
-
-            ))
-
+        # Absolute silence by redirecting system file descriptors
+        with silence_output():
+            df_work = df.copy()
+            metadata = Metadata.detect_from_dataframe(data=df_work)
             
-
-        if diff_neg > 0:
-
-            conditions.append(Condition(
-
-                num_rows=diff_neg,
-
-                column_values={sensitive_col: a_val_std, target_col: 0}
-
-            ))
-
+            synthesizer = GaussianCopulaSynthesizer(metadata)
+            synthesizer.fit(df_work)
             
-
-        if conditions:
-
-            try:
-
-                # sample_from_conditions expects a list of Condition objects
-
-                samples = synthesizer.sample_from_conditions(conditions=conditions)
-
-                all_samples.append(samples)
-
-            except Exception as e:
-
-                # Fallback: if sampling fails for a specific group, we continue with others
-
-                print(f"  Warning: Sampling failed for group {a_val}: {e}")
-
+            # Goal: Equalize selection rates across sensitive groups.
+            total_per_a = df_work.groupby(sensitive_col).size()
+            max_total = int(total_per_a.max())
+            target_pos_rate = float(df_work[target_col].mean())
             
-
-    final_df = pd.concat(all_samples).sample(frac=1).reset_index(drop=True)
-
-    return final_df.drop(columns=[target_col]), final_df[target_col]
+            all_samples = [df_work]
+            
+            for a_val in df_work[sensitive_col].unique():
+                target_n_pos = int(round(max_total * target_pos_rate))
+                target_n_neg = int(max_total - target_n_pos)
+                
+                group_a = df_work[df_work[sensitive_col] == a_val]
+                curr_pos = int((group_a[target_col] == 1).sum())
+                curr_neg = int((group_a[target_col] == 0).sum())
+                
+                diff_pos = int(target_n_pos - curr_pos)
+                diff_neg = int(target_n_neg - curr_neg)
+                
+                conditions = []
+                a_val_std = a_val.item() if hasattr(a_val, 'item') else a_val
+                
+                if diff_pos > 0:
+                    conditions.append(Condition(num_rows=diff_pos, column_values={sensitive_col: a_val_std, target_col: 1}))
+                if diff_neg > 0:
+                    conditions.append(Condition(num_rows=diff_neg, column_values={sensitive_col: a_val_std, target_col: 0}))
+                    
+                if conditions:
+                    try:
+                        samples = synthesizer.sample_from_conditions(conditions=conditions)
+                        all_samples.append(samples)
+                    except Exception as e:
+                        pass 
+            
+            final_df = pd.concat(all_samples).sample(frac=1).reset_index(drop=True)
+            return final_df.drop(columns=[target_col]), final_df[target_col]
