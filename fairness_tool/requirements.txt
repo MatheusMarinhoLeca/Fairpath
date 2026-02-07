@@ -1,0 +1,13 @@
+pandas
+numpy
+matplotlib
+seaborn
+scikit-learn
+aif360[AdversarialDebiasing,inFairness]
+fairlearn
+imbalanced-learn
+sdv
+tqdm
+reportlab
+tabulate
+openpyxl

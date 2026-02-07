@@ -1,0 +1,31 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+venv/
+ENV/
+env/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+Thumbtack.db
+desktop.ini
+
+# Logs
+*.log
+outputs/logs/
+
+# Outputs
+outputs/datasets/
+outputs/reports/
+fairness_tool/outputs/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
