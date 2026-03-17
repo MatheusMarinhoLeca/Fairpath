@@ -14,7 +14,8 @@ from utils.logging import setup_logging, log_action
 from config.defaults import POTENTIAL_SENSITIVE_ATTRIBUTES, DEFAULT_PRIORITY_SENSITIVE
 from data import (
     load_dataset, validate_file_path, validate_dataset, 
-    handle_duplicate_columns, infer_numeric_types, get_sensitive_mapping
+    handle_duplicate_columns, infer_numeric_types, get_sensitive_mapping,
+    create_composite_attribute, parse_attribute_input
 )
 from eda.statistics import get_basic_stats, get_comprehensive_stats
 from eda.visualizations import (
@@ -24,7 +25,7 @@ from eda.visualizations import (
 )
 from preprocessing.missing_values import impute_missing
 from preprocessing.outliers import remove_outliers_iqr
-from preprocessing.encoding import one_hot_encode, label_encode
+from preprocessing.encoding import one_hot_encode, label_encode, binarize_attribute
 from models.classification import train_classifier
 from fairness.metrics import compute_group_fairness, compute_classification_fairness, compute_individual_fairness
 from fairness.mitigation import mitigate_resampling, mitigate_relabeling, mitigate_synthetic
@@ -359,10 +360,31 @@ class FairnessApp:
         if not default_sens and potential:
             default_sens = potential[0]
 
-        self.sensitive_col = get_user_input("Enter sensitive column name", lambda x: x in self.df.columns, default=default_sens)
-        self.selections['fairness']['sensitive_column'] = self.sensitive_col
+        # --- Multi-Attribute Selection ---
+        print("\nEnter sensitive column name(s).")
+        print("To analyze intersectional fairness (e.g., Race AND Gender), enter multiple columns separated by commas.")
         
-        mapping = get_sensitive_mapping(self.df, self.original_df, self.sensitive_col)
+        while True:
+            user_input = get_user_input("Enter sensitive column name(s)", lambda x: True, default=default_sens)
+            try:
+                selected_cols = parse_attribute_input(user_input, self.df.columns.tolist())
+                if selected_cols:
+                    break
+                print("Error: No valid columns selected.")
+            except ValueError as e:
+                print(f"Error: {e}")
+
+        # Create composite attribute if multiple selected
+        self.df, self.sensitive_col = create_composite_attribute(self.df, selected_cols)
+        self.selections['fairness']['sensitive_column'] = self.sensitive_col
+        self.selections['fairness']['selected_sensitive_attributes'] = selected_cols # Store original selection
+
+        if len(selected_cols) > 1:
+            print(f"✔ Created composite sensitive attribute: '{self.sensitive_col}'")
+            # For composite attributes, we skip automatic mapping from original_df as the new col doesn't exist there
+            mapping = {} 
+        else:
+            mapping = get_sensitive_mapping(self.df, self.original_df, self.sensitive_col)
                         
         if mapping:
             self.inverse_sensitive_mapping = {v: k for k, v in mapping.items()}
@@ -423,6 +445,26 @@ class FairnessApp:
         self.unprivileged_group = other_vals # List of all other values
         if un_choice == '1':
             self.comparison_mode = 'combined'
+            
+            # --- New Feature: Binary Transformation ---
+            print("\nOption: Transform dataset to binary sensitive attribute?")
+            print("This will replace the sensitive column with 1 (Privileged) and 0 (Unprivileged).")
+            print("Recommended for mitigation strategies like Resampling/SMOTE to work correctly on the aggregate group.")
+            
+            if get_user_confirmation("Apply binary transformation?"):
+                self.df = binarize_attribute(self.df, self.sensitive_col, self.privileged_group, pos_label=1, neg_label=0)
+                
+                # Update App State
+                old_priv_name = self.privileged_group_name
+                self.privileged_group = 1
+                self.unprivileged_group = [0]
+                self.privileged_group_name = f"Privileged ({old_priv_name})"
+                
+                # Update mapping for reports
+                self.inverse_sensitive_mapping = {1: self.privileged_group_name, 0: "Unprivileged (Rest)"}
+                
+                print(f"✔ Dataset transformed. '{self.sensitive_col}' is now binary (1/0).")
+                
         else:
             self.comparison_mode = 'individual'
 

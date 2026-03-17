@@ -8,9 +8,9 @@ def get_tailored_recommendations(selections, metrics_before, metrics_after):
     recs = []
     
     # 1. Fairness Gap Analysis
-    di_before = metrics_before.get("Demographic Parity (Disparate Impact)", 1.0)
-    di_after = metrics_after.get("Demographic Parity (Disparate Impact)", 1.0)
-    spd_after = metrics_after.get("Demographic Parity (Stat. Parity Diff.)", 0.0)
+    di_before = metrics_before.get("Disparate Impact", 1.0)
+    di_after = metrics_after.get("Disparate Impact", 1.0)
+    spd_after = metrics_after.get("Statistical Parity Difference", 0.0)
     
     # Check if DI is still far from 1 (using 0.8-1.25 rule)
     if (di_after < 0.8 or di_after > 1.25) or abs(spd_after) > 0.1:
@@ -58,8 +58,8 @@ def generate_pdf_report(filename, stats_before, metrics_before, metrics_after, p
     
     styles = getSampleStyleSheet()
     # Custom styles
-    styles.add(ParagraphStyle(name='ItalicNormal', parent=styles['Normal'], fontName='Helvetica-Oblique'))
-    styles.add(ParagraphStyle(name='Small', parent=styles['Normal'], fontSize=8, leading=10))
+    styles.add(ParagraphStyle(name='ItalicNormal', parent='Normal', fontName='Helvetica-Oblique'))
+    styles.add(ParagraphStyle(name='Small', parent='Normal', fontSize=8, leading=10))
     
     story = []
     
@@ -164,7 +164,7 @@ def generate_pdf_report(filename, stats_before, metrics_before, metrics_after, p
     ]))
     story.append(t_comp)
     story.append(Spacer(1, 12))
-    story.append(Paragraph("<b>Note:</b> A 'Stat. Parity Diff' closer to 0 and a 'Disparate Impact' closer to 1 indicate a fairer model.", styles['Small']))
+    story.append(Paragraph("<b>Note:</b> A 'Statistical Parity Difference' closer to 0 and a 'Disparate Impact' closer to 1 indicate a fairer model.", styles['Small']))
     story.append(PageBreak())
 
     # 5. Visualizations with Explanations

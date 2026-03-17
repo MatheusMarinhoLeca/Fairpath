@@ -1,4 +1,5 @@
 import pandas as pd
+from typing import List, Tuple, Union
 
 def get_sensitive_mapping(df, original_df, sensitive_col):
     """Detects if a column was encoded and returns a mapping from original to current values."""
@@ -22,3 +23,65 @@ def get_sensitive_mapping(df, original_df, sensitive_col):
                 for _, row in temp_map.iterrows():
                     mapping[str(row['orig'])] = row['curr']
     return mapping
+
+def parse_attribute_input(user_input: str, available_columns: List[str]) -> List[str]:
+    """
+    Parses a comma-separated string of column names into a list.
+    Validates that each column exists in the available columns.
+    
+    Args:
+        user_input (str): Comma-separated column names (e.g., "race, gender").
+        available_columns (List[str]): List of valid column names in the DataFrame.
+        
+    Returns:
+        List[str]: List of valid column names found in the input.
+        
+    Raises:
+        ValueError: If any provided column name is invalid.
+    """
+    if not user_input:
+        return []
+        
+    # Split by comma and strip whitespace
+    cols = [c.strip() for c in user_input.split(',')]
+    
+    # Validate
+    invalid_cols = [c for c in cols if c not in available_columns]
+    if invalid_cols:
+        raise ValueError(f"Columns not found in dataset: {', '.join(invalid_cols)}")
+        
+    return cols
+
+def create_composite_attribute(df: pd.DataFrame, columns: List[str], separator: str = "_") -> Tuple[pd.DataFrame, str]:
+    """
+    Combines multiple columns into a single composite attribute.
+    
+    Args:
+        df (pd.DataFrame): The input DataFrame.
+        columns (List[str]): List of column names to combine.
+        separator (str): Separator string for the combined values.
+        
+    Returns:
+        Tuple[pd.DataFrame, str]: 
+            - The modified DataFrame with the new composite column.
+            - The name of the new composite column.
+    """
+    if not columns:
+        raise ValueError("No columns provided for composite attribute creation.")
+    
+    if len(columns) == 1:
+        return df, columns[0]
+    
+    # Create composite column name
+    composite_col_name = separator.join(columns)
+    
+    # Combine values efficiently
+    # Convert all to string, fill missing with 'NA', and join
+    composite_series = df[columns[0]].astype(str)
+    for col in columns[1:]:
+        composite_series = composite_series + separator + df[col].astype(str)
+        
+    df = df.copy()
+    df[composite_col_name] = composite_series
+    
+    return df, composite_col_name
