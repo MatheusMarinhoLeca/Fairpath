@@ -38,11 +38,6 @@ def get_tailored_recommendations(selections, metrics_before, metrics_after):
     if "Demographic Parity" in fair.get('specific_metric', '') and abs(spd_after) < 0.05:
         recs.append("<b>Beyond Parity:</b> You achieved Demographic Parity. Next, evaluate <i>Equalized Odds</i> to ensure that among qualified candidates, the error rates are also balanced.")
 
-    # 5. Individual Fairness
-    cons = metrics_after.get("Consistency Score")
-    if cons and cons < 0.85:
-        recs.append(f"<b>Individual Fairness Risk:</b> The Consistency Score of {cons:.2f} is low. This means the model often gives different predictions to very similar individuals. This 'noise' is a red flag for legal or ethical audits.")
-
     # Default if nothing specific triggered
     if not recs:
         recs.append("<b>Continuous Monitoring:</b> Your model maintains a good balance of accuracy and fairness. Implement automated 'Fairness Drift' detection to ensure this holds as the real-world data distribution changes.")
@@ -58,8 +53,8 @@ def generate_pdf_report(filename, stats_before, metrics_before, metrics_after, p
     
     styles = getSampleStyleSheet()
     # Custom styles
-    styles.add(ParagraphStyle(name='ItalicNormal', parent='Normal', fontName='Helvetica-Oblique'))
-    styles.add(ParagraphStyle(name='Small', parent='Normal', fontSize=8, leading=10))
+    styles.add(ParagraphStyle(name='ItalicNormal', parent=styles['Normal'], fontName='Helvetica-Oblique'))
+    styles.add(ParagraphStyle(name='Small', parent=styles['Normal'], fontSize=8, leading=10))
     
     story = []
     
@@ -84,12 +79,14 @@ def generate_pdf_report(filename, stats_before, metrics_before, metrics_after, p
         story.append(Paragraph(f"• <b>Cleanup Encoding:</b> {prep.get('remaining_categoricals', 'N/A')}", styles['Normal']))
         story.append(Spacer(1, 12))
         
-        # Fairness Explanations
+        # Fairness Setup
         fair = selections.get('fairness', {})
+        mit = selections.get('mitigation', {})
         story.append(Paragraph("<b>Fairness Setup:</b>", styles['Normal']))
         story.append(Paragraph(f"• <b>Sensitive Attribute:</b> {fair.get('sensitive_column', 'N/A')}", styles['Normal']))
         story.append(Paragraph(f"• <b>Privileged Group:</b> {fair.get('privileged_group', 'N/A')}", styles['Normal']))
         story.append(Paragraph(f"• <b>Metric Chosen:</b> {fair.get('specific_metric', 'N/A')}", styles['Normal']))
+        story.append(Paragraph(f"• <b>Bias Mitigation:</b> {mit.get('method', 'N/A')}", styles['Normal']))
         
         # Methodology Logic (Pros/Cons)
         story.append(Spacer(1, 12))
@@ -107,7 +104,12 @@ def generate_pdf_report(filename, stats_before, metrics_before, metrics_after, p
         elif "Relabeling" in mit_name:
             story.append(Paragraph("<i>Relabeling mitigation</i> flips labels of individuals near the decision boundary to achieve parity. <b>Pros:</b> Directly targets the metric. <b>Cons:</b> Modifies the 'ground truth' of your data.", styles['ItalicNormal']))
         elif "Synthetic" in mit_name:
-            story.append(Paragraph("<i>Synthetic Data Generation</i> uses AI to create realistic fake samples for under-represented groups. <b>Pros:</b> Increases data diversity. <b>Cons:</b> Relies on the quality of the generator; risk of 'hallucinating' patterns.", styles['ItalicNormal']))
+            if "CDA" in mit_name:
+                 story.append(Paragraph("<i>Counterfactual Data Augmentation (CDA)</i> creates new samples by flipping the sensitive attribute (e.g., changing 'Male' to 'Female') while keeping other features constant. <b>Pros:</b> Forces the model to be invariant to the sensitive attribute. <b>Cons:</b> Can create unrealistic data points if features are highly correlated with the sensitive attribute.", styles['ItalicNormal']))
+            elif "SMOTE" in mit_name:
+                 story.append(Paragraph("<i>SMOTE (Synthetic Minority Over-sampling Technique)</i> generates synthetic samples for the minority class (or group) by interpolating between existing samples. <b>Pros:</b> Increases data diversity and balances classes. <b>Cons:</b> Can propagate noise if not applied carefully.", styles['ItalicNormal']))
+            else:
+                 story.append(Paragraph("<i>Synthetic Data Generation</i> creates new samples to improve balance. <b>Pros:</b> Increases data diversity. <b>Cons:</b> Relies on the quality of the generation method.", styles['ItalicNormal']))
 
         story.append(Spacer(1, 18))
 
@@ -176,15 +178,23 @@ def generate_pdf_report(filename, stats_before, metrics_before, metrics_after, p
         plot_explanations = {
             "Baseline Confusion Matrix": "Shows how often the model correctly predicted the target in the original data. High diagonal values are good.",
             "Mitigated Confusion Matrix": "Shows model performance after mitigation. Compare this to the baseline to see if accuracy was sacrificed for fairness.",
+            "Baseline Subgroup Confusion Matrices": "Confusion matrices broken down by sensitive group. Helps identify if errors are concentrated in specific groups.",
+            "Mitigated Subgroup Confusion Matrices": "Subgroup confusion matrices after mitigation.",
+            "Baseline KDE Predicted Probabilities": "Distribution of predicted probabilities per group. Large overlaps suggest high parity; separated peaks suggest bias.",
+            "Mitigated KDE Predicted Probabilities": "Probability distributions after mitigation.",
             "Performance & Fairness Metrics Comparison": "A side-by-side view of all key metrics. Look for Fairness bars moving toward ideal values (0 for diffs, 1 for ratios).",
             "Class Distribution Comparison": "Shows if the balance between positive and negative labels changed after mitigation.",
             "Sensitive Attribute Distribution Comparison": "Shows if the representation of different sensitive groups (e.g. Races) was altered.",
             "Selection Rate Comparison P(Y=1|A)": "<b>Crucial:</b> Shows the probability of getting a positive outcome per group. Ideally, the bars should be level.",
+            "Grouped Bar Charts (Positive Rate)": "Detailed view of subgroup outcome rates.",
             "Baseline Subgroup Heatmap": "Counts of individuals per (Group, Outcome) before mitigation.",
             "Mitigated Subgroup Heatmap": "Counts of individuals per (Group, Outcome) after mitigation."
         }
         
         for title, img_path in plots.items():
+            if title == "Fairness-Utility Trade-off":
+                continue
+                
             if os.path.exists(img_path):
                 story.append(Paragraph(title, styles['Heading3']))
                 explanation = plot_explanations.get(title, "Visualization of dataset characteristics.")

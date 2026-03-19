@@ -1,4 +1,3 @@
-import pandas as pd
 import numpy as np
 
 def remove_outliers_iqr(df, columns=None):

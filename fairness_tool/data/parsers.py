@@ -1,7 +1,6 @@
 import pandas as pd
 import os
 from abc import ABC, abstractmethod
-from typing import Optional, List, Union
 
 class BaseParser(ABC):
     """Abstract base class for file parsers."""

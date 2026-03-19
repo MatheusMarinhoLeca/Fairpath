@@ -1,5 +1,4 @@
 import pandas as pd
-import os
 from .parsers import ParserFactory
 
 def load_dataset(file_path: str) -> pd.DataFrame:

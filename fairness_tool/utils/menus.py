@@ -1,5 +1,4 @@
 import os
-import sys
 
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
@@ -9,7 +8,10 @@ def print_header(title):
     print(f"{title}")
     print("=" * 50 + "\n")
 
-def get_user_choice(options, prompt="Select an option"):
+def get_user_choice(options, title=None, prompt="Select an option"):
+    if title:
+        print(f"\n{title}:")
+    
     for key, value in options.items():
         print(f"[{key}] {value}")
     

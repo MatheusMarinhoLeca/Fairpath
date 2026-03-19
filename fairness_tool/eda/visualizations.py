@@ -208,3 +208,61 @@ def plot_contingency_heatmap(df, sensitive_col, target_col, title, filename):
     sns.heatmap(contingency, annot=True, fmt='d', cmap='YlGnBu')
     plt.title(title)
     return save_plot(fig, filename)
+
+def plot_kde_probabilities(y_probs, sensitive_attr, filename):
+    """KDE Plots of Predicted Probabilities by sensitive group."""
+    df = pd.DataFrame({'Probability': y_probs, 'Group': sensitive_attr})
+    fig = plt.figure(figsize=(10, 6))
+    sns.kdeplot(data=df, x='Probability', hue='Group', fill=True, common_norm=False, alpha=0.5)
+    plt.title('KDE of Predicted Probabilities by Group')
+    plt.xlim(0, 1)
+    return save_plot(fig, filename)
+
+def plot_subgroup_confusion_matrices(y_true, y_pred, sensitive_attr, filename):
+    """Subgroup-Specific Confusion Matrices."""
+    groups = np.unique(sensitive_attr)
+    n_groups = len(groups)
+    cols = 2
+    rows = (n_groups + 1) // cols
+    
+    fig, axes = plt.subplots(rows, cols, figsize=(12, 5 * rows))
+    axes = axes.flatten()
+    
+    for i, group in enumerate(groups):
+        mask = (sensitive_attr == group)
+        if not any(mask):
+            axes[i].axis('off')
+            continue
+        cm = confusion_matrix(y_true[mask], y_pred[mask])
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=axes[i])
+        axes[i].set_title(f'Group: {group}')
+        axes[i].set_ylabel('True')
+        axes[i].set_xlabel('Pred')
+        
+    for j in range(i + 1, len(axes)):
+        axes[j].axis('off')
+        
+    plt.tight_layout()
+    return save_plot(fig, filename)
+
+def plot_fairness_utility_tradeoff(metrics_list, fairness_metric, utility_metric, filename):
+    """
+    Fairness–Utility Trade-off Scatter Plot.
+    metrics_list: list of dicts with metrics.
+    """
+    df = pd.DataFrame(metrics_list)
+    fig = plt.figure(figsize=(10, 6))
+    sns.scatterplot(data=df, x=fairness_metric, y=utility_metric, hue='Stage', s=100)
+    plt.title(f'Trade-off: {utility_metric} vs {fairness_metric}')
+    plt.grid(True, linestyle='--', alpha=0.6)
+    return save_plot(fig, filename)
+
+def plot_grouped_bar_charts(df, sensitive_col, target_col, filename):
+    """Grouped Bar Charts by Subgroup for categorical target rates."""
+    df_num = df.copy()
+    df_num[target_col] = pd.to_numeric(df_num[target_col], errors='coerce')
+    fig = plt.figure(figsize=(10, 6))
+    sns.barplot(data=df_num, x=sensitive_col, y=target_col, errorbar=None)
+    plt.title(f'Positive Rate by {sensitive_col}')
+    plt.ylabel('Positive Rate (Mean of Target)')
+    return save_plot(fig, filename)

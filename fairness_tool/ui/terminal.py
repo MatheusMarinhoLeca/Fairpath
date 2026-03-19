@@ -1,0 +1,179 @@
+import sys
+from typing import Dict, Any, List, Optional, Callable
+from utils.menus import clear_screen, print_header, get_user_choice, get_user_confirmation, get_user_input
+
+
+class TerminalUI:
+    """Handles all terminal-based user interactions."""
+    
+    def display_welcome(self):
+        clear_screen()
+        print_header("Fairness Toolkit for Tabular Datasets")
+
+    def get_main_menu_choice(self) -> str:
+        options = {'1': 'Load dataset', '2': 'Run Automated Benchmark', '3': 'Exit'}
+        return get_user_choice(options, title="Main Menu")
+
+    def get_benchmark_runs(self) -> int:
+        print_header("Automated Benchmark")
+        val = get_user_input("Enter number of runs per configuration", lambda x: x.isdigit())
+        return int(val)
+
+    def get_dataset_path(self, validator: Callable) -> str:
+        print_header("Dataset Loading")
+        return get_user_input("Enter dataset path (.csv or .xlsx)", validator)
+
+    def confirm_target_col(self, detected: str) -> bool:
+        return get_user_confirmation(f"Is '{detected}' the target column?")
+
+    def get_target_col(self, columns: List[str]) -> str:
+        return get_user_input("Enter target column name", lambda x: x in columns)
+
+    def display_message(self, message: str):
+        print(message)
+
+    def wait_for_user(self, message: str = "\nPress Enter to continue..."):
+        input(message)
+
+    def get_feature_selection_method(self) -> str:
+        feat_options = {
+            '1': 'Keep specific features (Manual Selection)',
+            '2': 'Drop specific features (e.g. IDs, Names)',
+            '3': 'Skip feature selection'
+        }
+        return get_user_choice(feat_options, title="Select Feature Selection Method")
+
+    def get_columns_to_keep(self, all_columns: List[str]) -> List[str]:
+        print(f"\nAvailable columns: {', '.join(all_columns)}")
+        cols_input = get_user_input("Enter column names to KEEP (comma separated)", lambda x: True)
+        return [c.strip() for c in cols_input.split(',') if c.strip() in all_columns]
+
+    def get_columns_to_drop(self, all_columns: List[str]) -> List[str]:
+        print(f"\nAvailable columns: {', '.join(all_columns)}")
+        cols_input = get_user_input("Enter column names to DROP (comma separated)", lambda x: True)
+        return [c.strip() for c in cols_input.split(',') if c.strip() in all_columns]
+
+    def ask_handle_missing_values(self) -> Optional[str]:
+        if get_user_confirmation("Do you want to handle missing values?"):
+            strat_options = {
+                '1': 'Mean/Median (Pros: Retains data size; Cons: Can distort distributions, ignores correlations)',
+                '2': 'Mode (Pros: Works for categorical; Cons: Can bias towards majority class)',
+                '3': 'Drop (Pros: Removes noise; Cons: Reduces data size, potential bias if missingness is systematic)'
+            }
+            return get_user_choice(strat_options, title="Select Missing Value Strategy")
+        return None
+
+    def ask_handle_outliers(self) -> Optional[str]:
+        if get_user_confirmation("Do you want to handle outliers?"):
+            strat_options = {
+                '1': 'IQR-based removal (Pros: Removes extreme values that might drive bias; Cons: Might remove minority group outliers)',
+                '2': 'Skip (Pros: Retains all data; Cons: Models might be sensitive to outliers)'
+            }
+            return get_user_choice(strat_options, title="Select Outlier Strategy")
+        return None
+
+    def ask_encode_categorical(self, cat_cols: List[str], selected_features: List[str]) -> Optional[Dict[str, Any]]:
+        if get_user_confirmation("Do you want to encode categorical variables?"):
+            if not cat_cols:
+                return {"choice": "none"}
+            
+            if selected_features:
+                selected_cat = [c for c in cat_cols if c in selected_features]
+                if selected_cat:
+                    print(f"\nCRITICAL: The following SELECTED features are categorical and MUST be encoded to be used in the model: {', '.join(selected_cat)}")
+                else:
+                    print(f"\nNote: All selected features are already numeric. Other categorical columns in the dataset: {', '.join(cat_cols[:10])}...")
+            else:
+                print(f"\nDetected categorical columns: {', '.join(cat_cols[:20])}...")
+            
+            cols_input = get_user_input("Enter categorical column names to ENCODE (comma separated, leave empty for all)", lambda x: True, allow_empty=True)
+            cols_to_encode = [c.strip() for c in cols_input.split(',') if c.strip() in cat_cols] if cols_input.strip() else cat_cols
+            
+            if not cols_to_encode:
+                return {"choice": "none"}
+
+            strat_options = {
+                '1': 'One-hot encoding (Pros: No ordinal assumption, good for fairness; Cons: High dimensionality)',
+                '2': 'Label encoding (Pros: Low dimensionality; Cons: Impose arbitrary order, bad for linear fairness)'
+            }
+            strat = get_user_choice(strat_options, title="Select Encoding Method")
+            return {"choice": strat, "columns": cols_to_encode}
+        return None
+
+    def get_remaining_categorical_handling(self, remaining_cat: List[str]) -> str:
+        print(f"\nNotice: The following selected features are still categorical: {remaining_cat}")
+        print("To 'calculate all metrics', these must be numeric. How should they be handled?")
+        rem_options = {
+            '1': 'Label Encode automatically (Keeps column structure, converts to numbers)',
+            '2': 'Drop from model training (Features will be ignored by the model)',
+            '3': 'Keep as-is (Warning: They will be dropped automatically during model training)'
+        }
+        return get_user_choice(rem_options, title="Select Handling Method")
+
+    def get_sensitive_attributes(self, columns: List[str], default: Optional[str] = None) -> str:
+        print_header("Fairness Setup")
+        print("\nEnter sensitive column name(s).")
+        print("To analyze intersectional fairness (e.g., Race AND Gender), enter multiple columns separated by commas.")
+        return get_user_input("Enter sensitive column name(s)", lambda x: True, default=default)
+
+    def get_privileged_group(self, values: List[Any], mapping: Optional[Dict[Any, Any]] = None) -> str:
+        if mapping:
+            print(f"Values in sensitive column: {list(mapping.keys())}")
+            return get_user_input("Enter value for privileged group (by name)")
+        else:
+            print(f"Values in sensitive column: {values}")
+            return get_user_input("Enter value for privileged group")
+
+    def get_unprivileged_comparison_mode(self) -> str:
+        un_options = {
+            '1': 'All other groups combined',
+            '2': 'Against each group individually'
+        }
+        return get_user_choice(un_options, title="Select Unprivileged Group Comparison")
+
+    def confirm_binary_transformation(self) -> bool:
+        print("\nOption: Transform dataset to binary sensitive attribute?")
+        print("This will replace the sensitive column with 1 (Privileged) and 0 (Unprivileged).")
+        return get_user_confirmation("Apply binary transformation?")
+
+    def get_specific_fairness_metric(self) -> str:
+        metric_options = {
+            '1': 'Demographic Parity (Statistical Parity Difference, Disparate Impact)',
+            '2': 'Equalized Odds (Equal Opportunity Difference, Average Odds Difference)'
+        }
+        return get_user_choice(metric_options, title="Select Fairness Metric")
+
+    def get_model_choice(self) -> str:
+        model_options = {'1': 'Logistic Regression', '2': 'Random Forest', '3': 'Gradient Boosting (GBM)', '4': 'Support Vector Machine (SVM)'}
+        return get_user_choice(model_options, title="Select Model Type")
+
+    def get_mitigation_method(self) -> str:
+        print_header("Bias Mitigation")
+        options = {
+            '1': 'Resampling',
+            '2': 'Relabeling',
+            '3': 'Synthetic',
+            '4': 'Skip (Baseline)'
+        }
+        return get_user_choice(options, title="Select Mitigation Method")
+
+    def get_resampling_type(self) -> str:
+        res_options = {'1': 'Random Oversampling', '2': 'Undersampling'}
+        return get_user_choice(res_options, title="Select Resampling Type")
+
+    def get_synthetic_method(self) -> str:
+        synth_options = {'1': 'Synthetic Minority Over-sampling Technique (SMOTE)', '2': 'Counterfactual Data Augmentation (CDA)'}
+        return get_user_choice(synth_options, title="Select Synthetic Method")
+
+    def display_metrics(self, metrics: Dict[str, float], title: str = "Metrics"):
+        print(f"\n--- {title} ---")
+        for k, v in metrics.items():
+            print(f"  {k}: {v}")
+
+    def display_stats(self, stats: Dict[str, Any], title: str = "Statistics"):
+        print(f"\n--- {title} ---")
+        for k, v in stats.items():
+            print(f"  {k}: {v}")
+
+    def exit(self):
+        sys.exit()

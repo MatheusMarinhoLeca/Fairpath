@@ -2,6 +2,8 @@ from aif360.datasets import BinaryLabelDataset
 from aif360.metrics import BinaryLabelDatasetMetric, ClassificationMetric, DatasetMetric
 import pandas as pd
 import numpy as np
+from typing import Dict, Any
+from core.interfaces import FairnessMetric
 
 def _encode_if_needed(df, protected_attribute, privileged_group, unprivileged_group):
     """
@@ -32,87 +34,75 @@ def _encode_if_needed(df, protected_attribute, privileged_group, unprivileged_gr
         
     return df_encoded, new_priv_group, new_unpriv_group
 
-def compute_group_fairness(df, target_col, protected_attribute, privileged_group, unprivileged_group):
-    """
-    Computes Group Fairness metrics directly from AIF360.
-    """
-    df_use, priv_val, unpriv_val = _encode_if_needed(df, protected_attribute, privileged_group, unprivileged_group)
-    
-    dataset = BinaryLabelDataset(
-        favorable_label=1,
-        unfavorable_label=0,
-        df=df_use[[target_col, protected_attribute]],
-        label_names=[target_col],
-        protected_attribute_names=[protected_attribute]
-    )
-    
-    privileged_groups = [{protected_attribute: priv_val}]
-    unprivileged_groups = [{protected_attribute: val} for val in (unpriv_val if isinstance(unpriv_val, list) else [unpriv_val])]
-    
-    metric = BinaryLabelDatasetMetric(
-        dataset, 
-        unprivileged_groups=unprivileged_groups,
-        privileged_groups=privileged_groups
-    )
-    
-    return {
-        "Statistical Parity Difference": metric.statistical_parity_difference(),
-        "Disparate Impact": metric.disparate_impact()
-    }
+class GroupFairnessMetric(FairnessMetric):
+    def compute(self, df: pd.DataFrame, target_col: str, protected_attribute: str, 
+               privileged_group: Any, unprivileged_group: Any) -> Dict[str, float]:
+        df_use, priv_val, unpriv_val = _encode_if_needed(df, protected_attribute, privileged_group, unprivileged_group)
+        
+        dataset = BinaryLabelDataset(
+            favorable_label=1,
+            unfavorable_label=0,
+            df=df_use[[target_col, protected_attribute]],
+            label_names=[target_col],
+            protected_attribute_names=[protected_attribute]
+        )
+        
+        privileged_groups = [{protected_attribute: priv_val}]
+        unprivileged_groups = [{protected_attribute: val} for val in (unpriv_val if isinstance(unpriv_val, list) else [unpriv_val])]
+        
+        metric = BinaryLabelDatasetMetric(
+            dataset, 
+            unprivileged_groups=unprivileged_groups,
+            privileged_groups=privileged_groups
+        )
+        
+        return {
+            "Statistical Parity Difference": metric.statistical_parity_difference(),
+            "Disparate Impact": metric.disparate_impact()
+        }
+
+class ClassificationFairnessMetric(FairnessMetric):
+    def __init__(self, df_true: pd.DataFrame):
+        self.df_true = df_true
+
+    def compute(self, df_pred: pd.DataFrame, target_col: str, protected_attribute: str, 
+               privileged_group: Any, unprivileged_group: Any) -> Dict[str, float]:
+        # Reset indices to ensure positional alignment and avoid AIF360 reordering issues
+        df_true_clean = self.df_true.reset_index(drop=True)
+        df_pred_clean = df_pred.reset_index(drop=True)
+        
+        df_true_use, priv_val, unpriv_val = _encode_if_needed(df_true_clean, protected_attribute, privileged_group, unprivileged_group)
+        df_pred_use, _, _ = _encode_if_needed(df_pred_clean, protected_attribute, privileged_group, unprivileged_group)
+
+        dataset_true = BinaryLabelDataset(
+            favorable_label=1,
+            unfavorable_label=0,
+            df=df_true_use[[target_col, protected_attribute]],
+            label_names=[target_col],
+            protected_attribute_names=[protected_attribute]
+        )
+        
+        dataset_pred = BinaryLabelDataset(
+            favorable_label=1,
+            unfavorable_label=0,
+            df=df_pred_use[[target_col, protected_attribute]],
+            label_names=[target_col],
+            protected_attribute_names=[protected_attribute]
+        )
+        
+        privileged_groups = [{protected_attribute: priv_val}]
+        unprivileged_groups = [{protected_attribute: val} for val in (unpriv_val if isinstance(unpriv_val, list) else [unpriv_val])]
+        
+        metric = ClassificationMetric(
+            dataset_true, dataset_pred,
+            unprivileged_groups=unprivileged_groups,
+            privileged_groups=privileged_groups
+        )
+        
+        return {
+            "Equal Opportunity Difference": metric.equal_opportunity_difference(),
+            "Average Odds Difference": metric.average_odds_difference()
+        }
 
 def compute_classification_fairness(df_true, df_pred, target_col, protected_attribute, privileged_group, unprivileged_group):
-    """
-    Computes Classification Fairness metrics directly from AIF360.
-    """
-    df_true_use, priv_val, unpriv_val = _encode_if_needed(df_true, protected_attribute, privileged_group, unprivileged_group)
-    df_pred_use, _, _ = _encode_if_needed(df_pred, protected_attribute, privileged_group, unprivileged_group)
-
-    dataset_true = BinaryLabelDataset(
-        favorable_label=1,
-        unfavorable_label=0,
-        df=df_true_use[[target_col, protected_attribute]],
-        label_names=[target_col],
-        protected_attribute_names=[protected_attribute]
-    )
-    
-    dataset_pred = BinaryLabelDataset(
-        favorable_label=1,
-        unfavorable_label=0,
-        df=df_pred_use[[target_col, protected_attribute]],
-        label_names=[target_col],
-        protected_attribute_names=[protected_attribute]
-    )
-    
-    privileged_groups = [{protected_attribute: priv_val}]
-    unprivileged_groups = [{protected_attribute: val} for val in (unpriv_val if isinstance(unpriv_val, list) else [unpriv_val])]
-    
-    metric = ClassificationMetric(
-        dataset_true, dataset_pred,
-        unprivileged_groups=unprivileged_groups,
-        privileged_groups=privileged_groups
-    )
-    
-    return {
-        "Equal Opportunity Difference": metric.equal_opportunity_difference(),
-        "Average Odds Difference": metric.average_odds_difference(),
-        "Theil Index": metric.theil_index()
-    }
-
-def compute_individual_fairness(df, target_col, n_neighbors=5):
-    """
-    Computes Individual Fairness metrics directly from AIF360.
-    """
-    df_numeric = df.select_dtypes(include=[np.number])
-    
-    dataset = BinaryLabelDataset(
-        favorable_label=1,
-        unfavorable_label=0,
-        df=df_numeric,
-        label_names=[target_col],
-        protected_attribute_names=[]
-    )
-    
-    metric = DatasetMetric(dataset)
-    return {
-        "Consistency Score": metric.consistency(n_neighbors=n_neighbors)[0]
-    }
+    return ClassificationFairnessMetric(df_true).compute(df_pred, target_col, protected_attribute, privileged_group, unprivileged_group)

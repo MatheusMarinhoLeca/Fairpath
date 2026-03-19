@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 
 def handle_duplicate_columns(df):
     """Renames duplicate columns by appending a suffix."""

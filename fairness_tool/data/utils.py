@@ -1,5 +1,5 @@
 import pandas as pd
-from typing import List, Tuple, Union
+from typing import List, Tuple
 
 def get_sensitive_mapping(df, original_df, sensitive_col):
     """Detects if a column was encoded and returns a mapping from original to current values."""
