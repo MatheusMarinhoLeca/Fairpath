@@ -43,7 +43,33 @@ class WorkflowController:
             elif choice == '2':
                 self.benchmark_workflow()
             elif choice == '3':
+                self.run_visualization_workflow()
+            elif choice == '4':
                 self.ui.exit()
+
+    def run_visualization_workflow(self):
+        try:
+            from reporting.benchmark_viz import BenchmarkVisualizer
+            
+            file_path = self.ui.get_benchmark_file_path()
+            if not file_path or not os.path.exists(file_path):
+                 self.ui.display_message("\nInvalid file path or file not found.")
+                 self.ui.wait_for_user()
+                 return
+                 
+            self.ui.display_message(f"\nLoading benchmark results from {file_path}...")
+            viz = BenchmarkVisualizer(file_path)
+            
+            self.ui.display_message("\nGenerating standard report (Scatter Plots, Bar Charts, Heatmaps)...")
+            viz.generate_full_report()
+            
+            self.ui.display_message(f"\nVisualization complete. Check the 'viz_report' folder in {os.path.dirname(file_path)}.")
+            self.ui.wait_for_user()
+        except Exception as e:
+            self.ui.display_message(f"\nError during visualization: {e}")
+            import traceback
+            traceback.print_exc()
+            self.ui.wait_for_user()
 
     def benchmark_workflow(self):
         try:

@@ -11,13 +11,35 @@ class TerminalUI:
         print_header("Fairness Toolkit for Tabular Datasets")
 
     def get_main_menu_choice(self) -> str:
-        options = {'1': 'Load dataset', '2': 'Run Automated Benchmark', '3': 'Exit'}
+        options = {'1': 'Load dataset', '2': 'Run Automated Benchmark', '3': 'Visualize Benchmark Results', '4': 'Exit'}
         return get_user_choice(options, title="Main Menu")
 
     def get_benchmark_runs(self) -> int:
         print_header("Automated Benchmark")
         val = get_user_input("Enter number of runs per configuration", lambda x: x.isdigit())
         return int(val)
+
+    def get_benchmark_file_path(self, default_dir: str = "outputs/reports") -> str:
+        print_header("Benchmark Visualization")
+        import os
+        
+        # List available files
+        files = []
+        if os.path.exists(default_dir):
+            files = [f for f in os.listdir(default_dir) if f.startswith("benchmark_results") and (f.endswith(".csv") or f.endswith(".xlsx"))]
+            files.sort(reverse=True)
+            
+        if files:
+            print(f"Found recent benchmark files in {default_dir}:")
+            for i, f in enumerate(files[:5]):
+                print(f"  {i+1}. {f}")
+            print("  0. Enter custom path")
+            
+            choice = get_user_input("Select a file number or 0 for custom path", lambda x: x.isdigit() and 0 <= int(x) <= len(files[:5]))
+            if choice != '0':
+                return os.path.join(default_dir, files[int(choice)-1])
+        
+        return get_user_input("Enter path to benchmark results file (.csv or .xlsx)", lambda x: os.path.exists(x) and (x.endswith(".csv") or x.endswith(".xlsx") or x.endswith(".xls")))
 
     def get_dataset_path(self, validator: Callable) -> str:
         print_header("Dataset Loading")

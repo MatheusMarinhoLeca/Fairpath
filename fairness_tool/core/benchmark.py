@@ -25,6 +25,12 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 # Suppress expected aif360 warnings about small subgroups during large sweeps
 warnings.filterwarnings("ignore", category=RuntimeWarning, module="aif360")
+# Suppress performance warnings about fragmentation (common with many-column datasets like Adult)
+try:
+    from pandas.errors import PerformanceWarning
+    warnings.filterwarnings("ignore", category=PerformanceWarning)
+except ImportError:
+    pass
 
 # Override the showwarning function
 warnings.showwarning = pause_on_warning
@@ -100,8 +106,12 @@ class BenchmarkEngine:
             # Standardize labels: good is 1 (favorable), bad is 0
             df[target_col] = df[target_col].apply(lambda x: 1 if str(x).lower() == 'good' else 0)
             
-            sensitive_attrs = ['sex', 'age'] # We pick the two primary ones
-            privileged_groups = {'sex': 'male', 'age': 'aged'}
+            # AGE: German dataset 'age' is numeric. We need to categorize it if we want to use 'aged'.
+            # Common benchmark split for German Credit: aged (>25) vs young (<=25)
+            df['age_cat'] = df['age'].apply(lambda x: 'aged' if x > 25 else 'young')
+            
+            sensitive_attrs = ['sex', 'age_cat']
+            privileged_groups = {'sex': 'male', 'age_cat': 'aged'}
             
             datasets.append(('German Credit', df, target_col, sensitive_attrs, privileged_groups))
         except Exception as e:
@@ -112,9 +122,9 @@ class BenchmarkEngine:
 
     def generate_configurations(self):
         """Generates all combinations of preprocessing, models, and mitigation."""
-        missing_strategies = ['skip', 'mean', 'mode', 'drop']
-        outlier_strategies = ['skip', 'iqr']
-        encoding_strategies = ['one-hot', 'label']
+        missing_strategies = ['mode']
+        outlier_strategies = ['iqr']
+        encoding_strategies = ['one-hot']
         models = ['logistic', 'random_forest', 'gbm', 'svm']
         mitigations = [
             ('none', None),
@@ -124,9 +134,8 @@ class BenchmarkEngine:
             ('synthetic_smote', 'smote'),
             ('synthetic_cda', 'cda')
         ]
-        metrics = ['1', '2'] # 1: Demographic Parity, 2: Equalized Odds
-        unprivileged_strategies = ['combined', 'individual']
-        binary_trans = [True, False]
+        unprivileged_strategies = ['combined']
+        binary_trans = [True]
 
         configs = list(itertools.product(
             missing_strategies, 
@@ -134,7 +143,6 @@ class BenchmarkEngine:
             encoding_strategies, 
             models, 
             mitigations, 
-            metrics,
             unprivileged_strategies,
             binary_trans
         ))
@@ -147,60 +155,104 @@ class BenchmarkEngine:
             return
 
         configs = self.generate_configurations()
-        total_configs = len(configs)
         
         start_time = time.time()
         
         for ds_name, df_original, target_col, sensitive_attrs, privileged_groups_meta in datasets_to_run:
+            # New requirement: Do each sensitive attribute individually, THEN combined
+            analysis_targets = []
+            # 1. Individual attributes
+            for attr in sensitive_attrs:
+                analysis_targets.append(([attr], {attr: privileged_groups_meta[attr]}))
+            
+            # 2. Combined attribute (only if there's more than one)
+            if len(sensitive_attrs) > 1:
+                analysis_targets.append((sensitive_attrs, privileged_groups_meta))
+
             # Apply debug sample limit if specified
             if self.debug_sample_limit and len(df_original) > self.debug_sample_limit:
                 print(f"--- DEBUG MODE: Limiting {ds_name} to {self.debug_sample_limit} samples ---")
-                df_original = df_original.sample(n=self.debug_sample_limit, random_state=42).reset_index(drop=True)
+                df_original_sampled = df_original.sample(n=self.debug_sample_limit, random_state=42).reset_index(drop=True)
+            else:
+                df_original_sampled = df_original.copy()
 
-            for config_idx, config in enumerate(configs):
-                (miss_strat, out_strat, enc_strat, model_name, 
-                 mit_tuple, metric_choice, unpriv_strat, bin_trans) = config
+            total_configs_for_ds = len(configs) * len(analysis_targets)
+            current_ds_config_idx = 0
+
+            for current_attrs, current_priv_meta in analysis_targets:
+                attr_display_name = ", ".join(current_attrs)
                 
-                mit_name, mit_sub = mit_tuple
+                # Pre-calculate group info for display
+                if len(current_attrs) == 1:
+                    primary_sens = current_attrs[0]
+                    priv_val = current_priv_meta[primary_sens]
+                    all_vals = df_original_sampled[primary_sens].unique()
+                    unpriv_vals = [str(v) for v in all_vals if str(v) != str(priv_val)]
+                else:
+                    # Combined case
+                    priv_val = "_".join([str(current_priv_meta[attr]) for attr in current_attrs])
+                    # For unprivileged display in combined mode, we can show a few unique combinations that aren't the privileged one
+                    df_temp, composite_col = create_composite_attribute(df_original_sampled, current_attrs)
+                    all_vals = df_temp[composite_col].unique()
+                    unpriv_vals = [str(v) for v in all_vals if str(v) != str(priv_val)]
                 
-                # Preliminary Progress reporting
-                self._print_progress(
-                    ds_name, config_idx + 1, total_configs, 
-                    model_name, mit_name, metric_choice, 0
-                )
-                
-                for run_num in range(1, self.num_runs + 1):
-                    self._print_progress(
-                        ds_name, config_idx + 1, total_configs, 
-                        model_name, mit_name, metric_choice, run_num
-                    )
+                unpriv_display = ", ".join(unpriv_vals[:3]) + ("..." if len(unpriv_vals) > 3 else "")
+
+                for config_idx, config in enumerate(configs):
+                    current_ds_config_idx += 1
+                    (miss_strat, out_strat, enc_strat, model_name, 
+                     mit_tuple, unpriv_strat, bin_trans) = config
                     
-                    try:
-                        # Execute single run
-                        res = self.execute_single_run(
-                            df_original.copy(), target_col, sensitive_attrs, 
-                            privileged_groups_meta, config, run_num, ds_name
+                    mit_name, mit_sub = mit_tuple
+                    
+                    for run_num in range(1, self.num_runs + 1):
+                        self._print_progress(
+                            f"{ds_name} ({attr_display_name})", 
+                            current_ds_config_idx, total_configs_for_ds, 
+                            model_name, mit_name, run_num,
+                            miss_strat, out_strat, priv_val, unpriv_display
                         )
-                        self.results.append(res)
-                    except Exception as e:
-                        print(f"\n[!] Error in Configuration {config_idx + 1}: {e}")
-                        # Optionally record the failure in results
-                        error_res = {
-                            'Dataset': ds_name,
-                            'Model Type': model_name,
-                            'Mitigation Technique': mit_name,
-                            'Run Number': run_num,
-                            'Error': str(e)
-                        }
-                        self.results.append(error_res)
-                        # Small pause to allow user to see error before progress screen clears
-                        time.sleep(1)
+                        
+                        try:
+                            # Execute single run with specific attributes
+                            res = self.execute_single_run(
+                                df_original_sampled.copy(), target_col, current_attrs, 
+                                current_priv_meta, config, run_num, ds_name
+                            )
+                            
+                            # VALIDATION: Ensure all 4 required fairness metrics are present
+                            required_metrics = [
+                                "Statistical Parity Difference", 
+                                "Disparate Impact", 
+                                "Equal Opportunity Difference", 
+                                "Average Odds Difference"
+                            ]
+                            missing_metrics = [m for m in required_metrics if m not in res or pd.isna(res[m])]
+                            
+                            if missing_metrics:
+                                print(f"\n\n!!! CRITICAL ALERT: MISSING FAIRNESS METRICS !!!")
+                                print(f"Run {run_num} failed to produce: {', '.join(missing_metrics)}")
+                                print(f"Configuration: {config}")
+                                input("\nExecution paused. Please check logs. Press Enter to continue anyway...")
+
+                            self.results.append(res)
+                        except Exception as e:
+                            print(f"\n[!] Error in {ds_name} [{attr_display_name}] Config {config_idx + 1}: {e}")
+                            error_res = {
+                                'Dataset': ds_name,
+                                'Sensitive Attributes': attr_display_name,
+                                'Model Type': model_name,
+                                'Mitigation Technique': mit_name,
+                                'Run Number': run_num,
+                                'Error': str(e)
+                            }
+                            self.results.append(error_res)
+                            time.sleep(1)
 
         self.save_results()
         print(f"\nBenchmark completed in {time.time() - start_time:.2f} seconds.")
 
-    def _print_progress(self, dataset, config_idx, total_configs, model, mitigation, metric, run):
-        metric_label = 'Demographic Parity' if metric == '1' else 'Equalized Odds'
+    def _print_progress(self, dataset, config_idx, total_configs, model, mitigation, run, miss_strat, out_strat, priv_group, unpriv_group):
         # Clear screen and print status
         sys.stdout.write("\033[H\033[J") 
         print(f"[Dataset: {dataset}]")
@@ -209,7 +261,9 @@ class BenchmarkEngine:
         print(f"Configuration {config_idx} / {total_configs}")
         print(f"Model: {model}")
         print(f"Bias Mitigation: {mitigation}")
-        print(f"Fairness Metric: {metric_label}")
+        print(f"Fairness Metric: Exhaustive (All Calculated)")
+        print(f"Missing Values: {miss_strat} | Outliers: {out_strat}")
+        print(f"Privileged Group: {priv_group} | Unprivileged: {unpriv_group}")
         print(f"Run: {run} / {self.num_runs}")
         print(f"\nStatus: {'Training...' if run > 0 else 'Initializing...'}")
         
@@ -219,7 +273,7 @@ class BenchmarkEngine:
 
     def execute_single_run(self, df, target_col, sensitive_attrs, privileged_groups_meta, config, run_num, ds_name):
         (miss_strat, out_strat, enc_strat, model_name, 
-         mit_tuple, metric_choice, unpriv_strat, bin_trans) = config
+         mit_tuple, unpriv_strat, bin_trans) = config
         
         mit_name, mit_sub = mit_tuple
         
@@ -231,9 +285,36 @@ class BenchmarkEngine:
         if out_strat == 'iqr':
             df = remove_outliers_iqr(df)
             
-        # 3. Preprocessing: Encoding
+        # 3. Fairness Setup (BEFORE Encoding to preserve original labels)
+        df, composite_sens_col = create_composite_attribute(df, sensitive_attrs)
+        
+        if len(sensitive_attrs) == 1:
+            privileged_val_raw = privileged_groups_meta[sensitive_attrs[0]]
+        else:
+            privileged_val_raw = "_".join([str(privileged_groups_meta[attr]) for attr in sensitive_attrs])
+            
+        # Create a dedicated column for fairness evaluation that will NOT be encoded
+        fairness_eval_col = "_fairness_eval_sens_attr"
+        df[fairness_eval_col] = df[composite_sens_col].copy()
+        
+        if bin_trans:
+            df = binarize_attribute(df, composite_sens_col, privileged_val_raw)
+            # Also binarize the evaluation column for consistency
+            df = binarize_attribute(df, fairness_eval_col, privileged_val_raw)
+            eval_priv_val = 1
+            eval_unpriv_vals = [0]
+            # Use the raw descriptive name for the report display
+            display_priv_val = privileged_val_raw
+        else:
+            eval_priv_val = privileged_val_raw
+            eval_unpriv_vals = [x for x in df[fairness_eval_col].unique() if str(x) != str(eval_priv_val)]
+            display_priv_val = privileged_val_raw
+
+        # 4. Preprocessing: Encoding
+        # Exclude fairness_eval_col from encoding candidates
         cat_cols = list(df.select_dtypes(exclude=['number']).columns)
         if target_col in cat_cols: cat_cols.remove(target_col)
+        if fairness_eval_col in cat_cols: cat_cols.remove(fairness_eval_col)
         
         if enc_strat == 'one-hot' and cat_cols:
             df = one_hot_encode(df, target_col, columns=cat_cols)
@@ -244,92 +325,67 @@ class BenchmarkEngine:
             from sklearn.preprocessing import LabelEncoder
             df[target_col] = LabelEncoder().fit_transform(df[target_col].astype(str))
 
-        # 4. Fairness Setup
-        df, composite_sens_col = create_composite_attribute(df, sensitive_attrs)
-        
-        if len(sensitive_attrs) == 1:
-            privileged_val = privileged_groups_meta[sensitive_attrs[0]]
-        else:
-            privileged_val = "_".join([str(privileged_groups_meta[attr]) for attr in sensitive_attrs])
-        
-        if bin_trans:
-            df = binarize_attribute(df, composite_sens_col, privileged_val)
-            privileged_val = 1
-            unprivileged_vals = [0]
-        else:
-            unprivileged_vals = [x for x in df[composite_sens_col].unique() if str(x) != str(privileged_val)]
-
         # 5. Bias Mitigation
+        # Mitigation should use the composite_sens_col (which might be encoded/binarized already)
         if mit_name == 'resampling_over' or mit_name == 'resampling_under':
             mitigator = ResamplingMitigation(mit_sub)
-            df = mitigator.mitigate(df, target_col, composite_sens_col, privileged_val, unprivileged_vals)
+            df = mitigator.mitigate(df, target_col, composite_sens_col, 
+                                   1 if bin_trans else privileged_val_raw, 
+                                   [0] if bin_trans else eval_unpriv_vals)
         elif mit_name == 'relabeling':
             mitigator = RelabelingMitigation()
-            df = mitigator.mitigate(df, target_col, composite_sens_col, privileged_val, unprivileged_vals)
+            df = mitigator.mitigate(df, target_col, composite_sens_col, 
+                                   1 if bin_trans else privileged_val_raw, 
+                                   [0] if bin_trans else eval_unpriv_vals)
         elif mit_name.startswith('synthetic'):
             mitigator = SyntheticMitigation(mit_sub)
-            df = mitigator.mitigate(df, target_col, composite_sens_col, privileged_val, unprivileged_vals)
+            df = mitigator.mitigate(df, target_col, composite_sens_col, 
+                                   1 if bin_trans else privileged_val_raw, 
+                                   [0] if bin_trans else eval_unpriv_vals)
         
         # 6. Model Training & Evaluation
-        X = df.drop(columns=[target_col])
+        # Drop target and fairness_eval_col from features
+        X = df.drop(columns=[target_col, fairness_eval_col])
         y = df[target_col]
         
-        # Ensure all columns in X are numeric via preprocessing if not already
-        cat_cols = list(X.select_dtypes(exclude=['number']).columns)
-        if cat_cols:
-             X = one_hot_encode(X, None, columns=cat_cols)
+        # Ensure all columns in X are numeric
+        cat_cols_remaining = list(X.select_dtypes(exclude=['number']).columns)
+        if cat_cols_remaining:
+             X = one_hot_encode(X, None, columns=cat_cols_remaining)
              
         X_num = X.select_dtypes(include=[np.number])
         if X_num.isnull().sum().sum() > 0:
             X_num = X_num.fillna(X_num.mean())
             
-        # The trainer splits data inside: X_train_val, X_test, y_train_val, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-        # We need to recreate this split to get the correct indices for aligning predictions with sensitive attributes.
         from sklearn.model_selection import train_test_split
-        # We only need test_idx from this split to align sensitive attributes
         _, _, _, _, _, test_idx = train_test_split(
             X_num, y, df.index, test_size=0.2, random_state=42
         )
         
-        # Use the trainer for training, but pass X_num directly as requested for consistency
-        # Capture the scaled X_test returned by the trainer
         model, X_val, y_val, X_test_scaled, y_test, _, _ = self.trainer.train(X_num, y, model_name)
         
-        # We must use the model on the X_test we split here (but using the scaled version from trainer)
         y_pred = model.predict(X_test_scaled)
         perf_metrics = self.trainer.evaluate(model, X_test_scaled, y_test)
         
-        # Fairness Metrics
-        # Align sens_test with the test_idx
-        sens_test = df.loc[test_idx, composite_sens_col]
+        # Fairness Metrics (using fairness_eval_col)
+        sens_test = df.loc[test_idx, fairness_eval_col]
         
-        # Construct df_pred using scaled features (as numpy array) but with original column names for structure
-        # Note: The values are scaled, but metrics only care about target and sensitive columns
         df_pred = pd.DataFrame(X_test_scaled, columns=X_num.columns)
         df_pred[target_col] = y_pred
-        df_pred[composite_sens_col] = sens_test.values
+        df_pred[fairness_eval_col] = sens_test.values
         
-        df_true = pd.DataFrame({target_col: y_test.values, composite_sens_col: sens_test.values})
+        df_true = pd.DataFrame({target_col: y_test.values, fairness_eval_col: sens_test.values})
         
-        if metric_choice == '1':
-            metric_impl = GroupFairnessMetric()
-        else:
-            metric_impl = ClassificationFairnessMetric(df_true)
+        # Compute BOTH metric types
+        group_metric_impl = GroupFairnessMetric()
+        class_metric_impl = ClassificationFairnessMetric(df_true)
             
         fair_metrics = {}
         if unpriv_strat == 'combined':
-            res = metric_impl.compute(df_pred, target_col, composite_sens_col, privileged_val, unprivileged_vals)
-            fair_metrics.update(res)
-        else:
-            for uv in unprivileged_vals:
-                group_label = str(uv)
-                res = metric_impl.compute(df_pred, target_col, composite_sens_col, privileged_val, [uv])
-                for k, v in res.items():
-                    fair_metrics[f"[{group_label}] {k}"] = v
-            
-            if unprivileged_vals:
-                for k in res.keys():
-                    fair_metrics[f"Mean {k}"] = np.mean([fair_metrics[f"[{str(uv)}] {k}"] for uv in unprivileged_vals])
+            res_group = group_metric_impl.compute(df_pred, target_col, fairness_eval_col, eval_priv_val, eval_unpriv_vals)
+            fair_metrics.update(res_group)
+            res_class = class_metric_impl.compute(df_pred, target_col, fairness_eval_col, eval_priv_val, eval_unpriv_vals)
+            fair_metrics.update(res_class)
 
         # 7. Result Collection
         result = {
@@ -340,11 +396,13 @@ class BenchmarkEngine:
             'Model Type': model_name,
             'Mitigation Technique': mit_name,
             'Mitigation Detail': mit_sub,
-            'Fairness Metric Goal': 'Demographic Parity' if metric_choice == '1' else 'Equalized Odds',
+            'Fairness Metric Goal': 'Exhaustive (All)',
             'Unprivileged Comparison': unpriv_strat,
             'Binary Sensitive Attr': bin_trans,
             'Run Number': run_num,
-            'Sensitive Attributes': ", ".join(sensitive_attrs)
+            'Sensitive Attributes': ", ".join(sensitive_attrs),
+            'Chosen Sensitive Attribute': composite_sens_col,
+            'Privileged Group Value': display_priv_val
         }
         result.update(perf_metrics)
         result.update(fair_metrics)
