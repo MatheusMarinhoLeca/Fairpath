@@ -49,7 +49,13 @@ class WorkflowController:
         try:
             from core.benchmark import BenchmarkEngine
             n_runs = self.ui.get_benchmark_runs()
-            engine = BenchmarkEngine(n_runs)
+            
+            # Prompt for debug sample limit
+            from utils.menus import get_user_input
+            limit_input = get_user_input("Enter sample limit for debugging (press Enter to use full dataset)", lambda x: x == "" or x.isdigit(), allow_empty=True)
+            debug_limit = int(limit_input) if limit_input else None
+            
+            engine = BenchmarkEngine(n_runs, debug_sample_limit=debug_limit)
             self.ui.display_message("\nStarting automated benchmark. This may take a while...")
             engine.run()
             self.ui.display_message("\nBenchmark complete. Results saved in 'outputs/reports/'.")

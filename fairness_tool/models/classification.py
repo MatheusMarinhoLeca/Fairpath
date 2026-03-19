@@ -2,6 +2,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.svm import SVC
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 from typing import Dict, Any, Tuple
 from core.interfaces import ModelTrainer
 from evaluation.performance import evaluate_classification
@@ -11,8 +12,14 @@ class DefaultModelTrainer(ModelTrainer):
         X_train_val, X_test, y_train_val, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
         X_train, X_val, y_train, y_val = train_test_split(X_train_val, y_train_val, test_size=0.25, random_state=42)
         
+        # Scale data
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(X_train)
+        X_val = scaler.transform(X_val)
+        X_test = scaler.transform(X_test)
+        
         if model_type == 'logistic':
-            model = LogisticRegression(solver='liblinear', C=1.0, random_state=42)
+            model = LogisticRegression(solver='lbfgs', max_iter=5000, random_state=42)
         elif model_type == 'random_forest':
             model = RandomForestClassifier(n_estimators=100, max_depth=10, min_samples_split=5, random_state=42)
         elif model_type == 'gbm':
@@ -44,5 +51,5 @@ class DefaultModelTrainer(ModelTrainer):
 # Backward compatibility wrapper
 def train_classifier(X, y, model_type='logistic'):
     res = DefaultModelTrainer().train(X, y, model_type)
-    # Original expected 5 values: model, X_val, y_val, X_test, y_test
-    return res[0], res[1], res[2], res[3], res[4]
+    # Return all 7 values
+    return res

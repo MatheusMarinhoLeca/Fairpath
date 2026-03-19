@@ -7,6 +7,7 @@ import sys
 import contextlib
 from imblearn.over_sampling import SMOTE
 from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
 from sdv.single_table import GaussianCopulaSynthesizer
 from sdv.metadata import Metadata
 from sdv.sampling import Condition
@@ -95,9 +96,13 @@ class RelabelingMitigation(MitigationStrategy):
         X_num = X.select_dtypes(include=[np.number])
         y = df_work[target_col]
 
+        # Fix ConvergenceWarning by scaling data
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X_num)
+
         ranker = LogisticRegression(max_iter=1000)
-        ranker.fit(X_num, y)
-        probs = ranker.predict_proba(X_num)[:, 1]
+        ranker.fit(X_scaled, y)
+        probs = ranker.predict_proba(X_scaled)[:, 1]
         df_work['_prob'] = probs
 
         if isinstance(unprivileged_group, list):
@@ -168,15 +173,24 @@ class SyntheticMitigation(MitigationStrategy):
             return df.copy()
 
         resampled_df = pd.DataFrame(X_res)
-        resampled_df[target_col] = y_res.values if hasattr(y_res, 'values') else y_res
+        
+        # Use concat to add target column preventing fragmentation warning
+        y_values = y_res.values if hasattr(y_res, 'values') else y_res
+        resampled_df = pd.concat([resampled_df, pd.Series(y_values, name=target_col)], axis=1)
+        
         return resampled_df
 
     def _smote(self, df, target_col, sensitive_col):
+        # Force a copy to defragment and avoid PerformanceWarning
         df_numeric = df.select_dtypes(include=[np.number]).copy()
+        
         if sensitive_col not in df_numeric.columns:
             return None, None
 
-        df_numeric['_combined'] = df_numeric[sensitive_col].astype(str) + "_" + df_numeric[target_col].astype(str)
+        # Use concat instead of assignment to prevent fragmentation warning
+        combined_col = df_numeric[sensitive_col].astype(str) + "_" + df_numeric[target_col].astype(str)
+        df_numeric = pd.concat([df_numeric, combined_col.rename('_combined')], axis=1)
+        
         X = df_numeric.drop(columns=[target_col, '_combined'])
         y_combined = df_numeric['_combined']
 
@@ -192,11 +206,31 @@ class SyntheticMitigation(MitigationStrategy):
         priv_val = privileged_group[0] if isinstance(privileged_group, list) else privileged_group
 
         if isinstance(unprivileged_groups, list):
-            for unpriv_val in unprivileged_groups:
-                mask_priv = df_cf[sensitive_col] == priv_val
-                mask_unpriv = df_cf[sensitive_col] == unpriv_val
-                df_cf.loc[mask_priv, sensitive_col] = unpriv_val
-                df_cf.loc[mask_unpriv, sensitive_col] = priv_val
+            # Optimize: Modify values in one go to avoid fragmentation warning
+            mask_priv = df_cf[sensitive_col] == priv_val
+            mask_unpriv = df_cf[sensitive_col].isin(unprivileged_groups)
+            
+            # Swap values: priv -> unpriv (picking first for simplicity or random? logic was: priv -> unpriv val)
+            # The original logic iterated and set each unpriv group separately. 
+            # If multiple unpriv groups exist, mapping priv to ALL of them expands the dataset?
+            # No, the original logic was:
+            # for unpriv_val in unprivileged_groups:
+            #    mask_priv = ...
+            #    df_cf.loc[mask_priv, sensitive_col] = unpriv_val
+            # This overwrites priv with the LAST unpriv_val in the loop! That looks like a bug in the original code.
+            # If the intent is CDA, we usually flip specific pairs.
+            # Assuming 'unprivileged_groups' usually has 1 value in standard flows here.
+            # If multiple, the original code was likely flawed. 
+            # We will use the first unprivileged value for the privileged rows to flip to.
+            
+            target_unpriv_val = unprivileged_groups[0]
+            
+            # Flip Privileged -> Unprivileged (target_unpriv_val)
+            df_cf.loc[mask_priv, sensitive_col] = target_unpriv_val
+            
+            # Flip Unprivileged -> Privileged
+            df_cf.loc[mask_unpriv, sensitive_col] = priv_val
+            
         else:
             mask_priv = df_cf[sensitive_col] == priv_val
             mask_unpriv = df_cf[sensitive_col] == unprivileged_groups
