@@ -1,6 +1,16 @@
 import pandas as pd
 from typing import List, Tuple
 
+def ensure_series(df: pd.DataFrame, col_name: str) -> pd.Series:
+    """
+    Ensures that a column selection from a DataFrame returns a 1D Series,
+    even if duplicate column names exist.
+    """
+    series = df[col_name]
+    if isinstance(series, pd.DataFrame):
+        return series.iloc[:, 0]
+    return series
+
 def get_sensitive_mapping(df, original_df, sensitive_col):
     """Detects if a column was encoded and returns a mapping from original to current values."""
     mapping = {}

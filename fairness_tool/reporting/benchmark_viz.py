@@ -5,8 +5,10 @@ import os
 from typing import List, Optional, Tuple, Dict, Any
 import numpy as np
 from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, PageBreak
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, PageBreak, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
+from reporting.benchmark_analysis import BenchmarkAnalyzer
 
 class BenchmarkVisualizer:
     def __init__(self, file_path: str):
@@ -328,12 +330,16 @@ class BenchmarkVisualizer:
                 dataset=ds,
                 save_path=os.path.join(ds_dir, "pareto_frontier.png")
             )
-            
-        self.generate_pdf_summary(target_dir, datasets)
+        
+        # Analyze outliers
+        analyzer = BenchmarkAnalyzer(self.df)
+        outliers_data = analyzer.detect_high_performance_outliers(metric="Accuracy") # Using Accuracy as default for now
+        
+        self.generate_pdf_summary(target_dir, datasets, outliers_data)
         print(f"Report generation complete. Check {target_dir}")
 
-    def generate_pdf_summary(self, base_dir: str, datasets: List[str]):
-        """Generates a PDF summary report with all plots."""
+    def generate_pdf_summary(self, base_dir: str, datasets: List[str], outliers_data: Dict[str, Tuple[pd.DataFrame, bool]] = {}):
+        """Generates a PDF summary report with all plots and outlier tables."""
         filepath = os.path.join(base_dir, "benchmark_summary_report.pdf")
         doc = SimpleDocTemplate(filepath, pagesize=letter)
         styles = getSampleStyleSheet()
@@ -387,6 +393,67 @@ class BenchmarkVisualizer:
                     except Exception as e:
                         print(f"Warning: Could not add image {filename} to PDF: {e}")
             
+            # --- High-Performance Configurations Section ---
+            if ds in outliers_data:
+                df_out, is_outlier = outliers_data[ds]
+                
+                if not df_out.empty:
+                    story.append(PageBreak())
+                    
+                    if is_outlier:
+                        section_title = f"High-Performance Outliers: {ds}"
+                        desc_text = "The following configurations achieved unusually high accuracy compared to the rest of the runs (IQR outlier detection)."
+                    else:
+                        section_title = f"Top Performing Configurations: {ds}"
+                        desc_text = "No statistical outliers were found. The following table shows the top performing configurations for this dataset."
+                    
+                    story.append(Paragraph(section_title, styles['Heading2']))
+                    story.append(Spacer(1, 6))
+                    story.append(Paragraph(desc_text, styles['Normal']))
+                    story.append(Spacer(1, 12))
+                    
+                    # Prepare data for table
+                    analyzer = BenchmarkAnalyzer(self.df)
+                    df_formatted = analyzer.format_outlier_table(df_out)
+                    
+                    # Limit columns for PDF readability - Pick key ones
+                    key_cols = ['Model Type', 'Mitigation Technique', 'Mitigation Detail', 'Accuracy', 'Statistical Parity Difference']
+                    # Add 'F1' if exists
+                    if 'F1' in df_formatted.columns: key_cols.insert(4, 'F1')
+                    
+                    # Ensure we have data to show
+                    df_display = df_formatted[key_cols].head(10)
+                    
+                    # Convert DataFrame to list of lists for ReportLab
+                    # Use simpler values for display (round numbers)
+                    table_data = [df_display.columns.tolist()]
+                    for row in df_display.values:
+                        formatted_row = []
+                        for item in row:
+                            if isinstance(item, float):
+                                formatted_row.append(f"{item:.4f}")
+                            else:
+                                formatted_row.append(str(item))
+                        table_data.append(formatted_row)
+                    
+                    # Create Table
+                    t = Table(table_data)
+                    
+                    # Style the table
+                    t.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                        ('FONTSIZE', (0, 0), (-1, -1), 8), # Smaller font
+                    ]))
+                    
+                    story.append(t)
+                    story.append(Spacer(1, 12))
+                    
             story.append(PageBreak())
             
         try:

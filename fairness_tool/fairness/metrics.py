@@ -4,16 +4,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, Any
 from core.interfaces import FairnessMetric
-
-def ensure_series(df, col_name):
-    """
-    Ensures that a column selection from a DataFrame returns a 1D Series,
-    even if duplicate column names exist.
-    """
-    series = df[col_name]
-    if isinstance(series, pd.DataFrame):
-        return series.iloc[:, 0]
-    return series
+from data.utils import ensure_series
 
 def _encode_if_needed(df, protected_attribute, privileged_group, unprivileged_group):
     """

@@ -8,22 +8,14 @@ import contextlib
 from imblearn.over_sampling import SMOTE
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler, Normalizer
-from sklearn.impute import SimpleImputer
 from sdv.single_table import GaussianCopulaSynthesizer
 from sdv.metadata import Metadata
 from sdv.sampling import Condition
 from typing import Any, List, Optional
 from core.interfaces import MitigationStrategy
-
-def ensure_series(df, col_name):
-    """
-    Ensures that a column selection from a DataFrame returns a 1D Series,
-    even if duplicate column names exist.
-    """
-    series = df[col_name]
-    if isinstance(series, pd.DataFrame):
-        return series.iloc[:, 0]
-    return series
+from data.utils import ensure_series
+from preprocessing.missing_values import impute_missing
+from config.defaults import FAIRNESS_EVAL_COL
 
 @contextlib.contextmanager
 def silence_output():
@@ -108,15 +100,9 @@ class RelabelingMitigation(MitigationStrategy):
         X_num = X.select_dtypes(include=[np.number])
         y = df_work[target_col]
 
-        # Handle NaNs before LogisticRegression
+        # Handle NaNs before LogisticRegression using robust impute_missing
         if X_num.isnull().sum().sum() > 0:
-            # Handle all-NaN columns specifically to avoid SimpleImputer dropping them
-            all_nan_cols = X_num.columns[X_num.isnull().all()]
-            if not all_nan_cols.empty:
-                X_num[all_nan_cols] = 0
-            
-            imputer = SimpleImputer(strategy='mean')
-            X_num = pd.DataFrame(imputer.fit_transform(X_num), columns=X_num.columns, index=X_num.index)
+            X_num = impute_missing(X_num, strategy='mean')
 
         # Fix ConvergenceWarning by scaling and normalizing data
         scaler = StandardScaler()
@@ -197,7 +183,7 @@ class SyntheticMitigation(MitigationStrategy):
 
         # Identify columns that should NOT be treated as features for interpolation
         # but must be preserved or reconstructed (like the fairness evaluation column)
-        fairness_eval_col = "_fairness_eval_sens_attr"
+        fairness_eval_col = FAIRNESS_EVAL_COL
 
         if self.method == 'smote':
             resampled_df = self._smote(df, target_col, sensitive_col, fairness_eval_col)
@@ -253,15 +239,9 @@ class SyntheticMitigation(MitigationStrategy):
         # Select numeric columns for X features
         df_numeric = df_work.select_dtypes(include=[np.number])
 
-        # Handle NaNs before SMOTE
+        # Handle NaNs before SMOTE using robust impute_missing
         if df_numeric.isnull().sum().sum() > 0:
-            # Handle all-NaN columns specifically to avoid SimpleImputer dropping them
-            all_nan_cols = df_numeric.columns[df_numeric.isnull().all()]
-            if not all_nan_cols.empty:
-                df_numeric[all_nan_cols] = 0
-            
-            imputer = SimpleImputer(strategy='mean')
-            df_numeric = pd.DataFrame(imputer.fit_transform(df_numeric), columns=df_numeric.columns, index=df_numeric.index)
+            df_numeric = impute_missing(df_numeric, strategy='mean')
 
         # Create combined labels for balancing subgroups
         combined_col = s_sens.astype(str) + "_" + s_target.astype(str)
@@ -348,7 +328,7 @@ class SyntheticMitigation(MitigationStrategy):
             df_cf.loc[mask_unpriv, sensitive_col] = priv_val
 
         # Update the fairness evaluation column in the counterfactual data too
-        fairness_eval_col = "_fairness_eval_sens_attr"
+        fairness_eval_col = FAIRNESS_EVAL_COL
         if fairness_eval_col in df_cf.columns:
             df_cf[fairness_eval_col] = df_cf[sensitive_col].copy()
 

@@ -330,7 +330,14 @@ class WorkflowController:
         y = self.context.df[self.context.target_col]
         
         X = X.select_dtypes(include=[np.number])
-        if X.isnull().sum().sum() > 0: X = impute_missing(X, strategy='mean')
+        if X.isnull().sum().sum() > 0:
+            self.ui.display_message("\nWarning: Missing values detected in numeric features.")
+            if self.ui.confirm_action("This model requires imputation to proceed. Apply Mean Imputation?"):
+                X = impute_missing(X, strategy='mean')
+                self.ui.display_message("✔ Applied Mean Imputation.")
+            else:
+                self.ui.display_message("Operation aborted by user.")
+                return
 
         model, X_val, y_val, X_test, y_test, y_prob_val, y_prob_test = self.trainer.train(X, y, self.context.model_choice)
         self.context.y_test_bl = y_test
@@ -367,6 +374,24 @@ class WorkflowController:
             self.context.df_improved = self.context.df.copy()
             mit_info['method'] = "None (Baseline)"
         else:
+            # Check for missing values before proceeding with specific mitigation strategies
+            if method_choice in ['2', '3']: # Relabeling or Synthetic
+                # Check numeric features only as they are the ones imputed
+                numeric_cols = self.context.df.select_dtypes(include=[np.number]).columns
+                if self.context.target_col in numeric_cols:
+                    numeric_cols = numeric_cols.drop(self.context.target_col)
+                
+                if self.context.df[numeric_cols].isnull().sum().sum() > 0:
+                    self.ui.display_message("\nWarning: Missing values detected in numeric features.")
+                    self.ui.display_message("Selected mitigation method requires complete data.")
+                    if self.ui.confirm_action("Apply Mean Imputation to proceed?"):
+                        # Impute context dataframe so it propagates to mitigation
+                        self.context.df = impute_missing(self.context.df, strategy='mean')
+                        self.ui.display_message("✔ Applied Mean Imputation.")
+                    else:
+                        self.ui.display_message("Operation aborted by user.")
+                        return
+
             strategy = None
             if method_choice == '1':
                 res_type = self.ui.get_resampling_type()

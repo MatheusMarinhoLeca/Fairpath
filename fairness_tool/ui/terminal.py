@@ -179,6 +179,9 @@ class TerminalUI:
         }
         return get_user_choice(options, title="Select Mitigation Method")
 
+    def confirm_action(self, message: str) -> bool:
+        return get_user_confirmation(message)
+
     def get_resampling_type(self) -> str:
         res_options = {'1': 'Random Oversampling', '2': 'Undersampling'}
         return get_user_choice(res_options, title="Select Resampling Type")

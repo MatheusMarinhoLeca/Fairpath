@@ -159,6 +159,10 @@ class BenchmarkEngine:
         start_time = time.time()
         
         for ds_name, df_original, target_col, sensitive_attrs, privileged_groups_meta in datasets_to_run:
+            # Prepare metadata for display
+            features = [col for col in df_original.columns if col != target_col]
+            feature_str = ", ".join(features)
+            
             # New requirement: Do each sensitive attribute individually, THEN combined
             analysis_targets = []
             # 1. Individual attributes
@@ -171,7 +175,7 @@ class BenchmarkEngine:
 
             # Apply debug sample limit if specified
             if self.debug_sample_limit and len(df_original) > self.debug_sample_limit:
-                print(f"--- DEBUG MODE: Limiting {ds_name} to {self.debug_sample_limit} samples ---")
+                # print(f"--- DEBUG MODE: Limiting {ds_name} to {self.debug_sample_limit} samples ---")
                 df_original_sampled = df_original.sample(n=self.debug_sample_limit, random_state=42).reset_index(drop=True)
             else:
                 df_original_sampled = df_original.copy()
@@ -208,6 +212,7 @@ class BenchmarkEngine:
                     for run_num in range(1, self.num_runs + 1):
                         self._print_progress(
                             f"{ds_name} ({attr_display_name})", 
+                            target_col, sensitive_attrs, feature_str,
                             current_ds_config_idx, total_configs_for_ds, 
                             model_name, mit_name, run_num,
                             miss_strat, out_strat, priv_val, unpriv_display
@@ -230,6 +235,7 @@ class BenchmarkEngine:
                             missing_metrics = [m for m in required_metrics if m not in res or pd.isna(res[m])]
                             
                             if missing_metrics:
+                                # We need to re-print progress because input might clear screen? No, input pauses.
                                 print(f"\n\n!!! CRITICAL ALERT: MISSING FAIRNESS METRICS !!!")
                                 print(f"Run {run_num} failed to produce: {', '.join(missing_metrics)}")
                                 print(f"Configuration: {config}")
@@ -252,12 +258,24 @@ class BenchmarkEngine:
         self.save_results()
         print(f"\nBenchmark completed in {time.time() - start_time:.2f} seconds.")
 
-    def _print_progress(self, dataset, config_idx, total_configs, model, mitigation, run, miss_strat, out_strat, priv_group, unpriv_group):
-        # Clear screen and print status
+    def _print_progress(self, dataset, target_col, sens_attrs, features, config_idx, total_configs, model, mitigation, run, miss_strat, out_strat, priv_group, unpriv_group):
+        # Clear screen and print full dashboard
         sys.stdout.write("\033[H\033[J") 
+        print("==================================================")
+        print("Fairness Toolkit for Tabular Datasets - Benchmark")
+        print("==================================================\n")
+        
         print(f"[Dataset: {dataset}]")
+        print(f"Target Variable: {target_col}")
+        print(f"Sensitive Attributes: {sens_attrs}")
+        print(f"Training Features ({len(features.split(','))}):")
+        # Print features wrapped if needed, or just standard
+        print(features) 
+        print("-" * 50)
+        
         if self.debug_sample_limit:
             print(f"!!! DEBUG MODE ACTIVE: Sample Limit = {self.debug_sample_limit} !!!")
+            
         print(f"Configuration {config_idx} / {total_configs}")
         print(f"Model: {model}")
         print(f"Bias Mitigation: {mitigation}")

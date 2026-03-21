@@ -23,6 +23,12 @@ def impute_missing(df, strategy='mean', columns=None):
 
     if strategy in ['mean', 'median']:
         if len(numeric_cols) > 0:
+            # Handle all-NaN numeric columns to prevent SimpleImputer from dropping them
+            # This is critical for maintaining dataframe shape in downstream tasks
+            all_nan_numeric = [c for c in numeric_cols if df[c].isnull().all()]
+            if all_nan_numeric:
+                df[all_nan_numeric] = 0
+            
             imputer = get_imputer(strategy)
             df[numeric_cols] = imputer.fit_transform(df[numeric_cols])
         
@@ -33,9 +39,21 @@ def impute_missing(df, strategy='mean', columns=None):
     elif strategy == 'mode':
         # Mode strategy usually applies to all, but we filter if columns provided
         imputer = get_imputer('most_frequent')
-        cols_to_impute = numeric_cols + categorical_cols if columns is not None else df.columns
+        cols_to_impute = list(numeric_cols) + list(categorical_cols)
         
         if len(cols_to_impute) > 0:
+            # Handle all-NaN columns for mode imputation too if needed, though most_frequent usually handles it by returning first value or similar?
+            # Actually, SimpleImputer(strategy='most_frequent') might also drop all-NaN cols.
+            all_nan_cols = [c for c in cols_to_impute if df[c].isnull().all()]
+            if all_nan_cols:
+                # For categorical, 0 might not be valid, but 'Missing' or similar might be. 
+                # Ideally we check type. For now, fill numeric with 0, object with 'Missing'
+                for c in all_nan_cols:
+                    if pd.api.types.is_numeric_dtype(df[c]):
+                        df[c] = 0
+                    else:
+                        df[c] = 'Missing'
+
             # Only transform the subset
             new_values = imputer.fit_transform(df[cols_to_impute])
             df[cols_to_impute] = new_values
