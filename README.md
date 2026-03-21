@@ -34,3 +34,9 @@ This is a command-line tool for analyzing and mitigating bias in tabular dataset
 *   `fairness_tool/`: Source code.
 *   `fairness_tool/outputs/`: Generated reports, plots, and datasets.
 *   `fairness_tool/config/`: Configuration files.
+
+## Recent Improvements
+
+*   **Robust Evaluation:** Added 5-Fold Stratified Cross-Validation to the model training pipeline.
+*   **Enhanced Metrics:** Included ROC AUC score and weighted F1/Precision/Recall for better handling of imbalanced datasets.
+*   **Overfitting Check:** Improved overfitting detection using Cross-Validation accuracy instead of training accuracy.
