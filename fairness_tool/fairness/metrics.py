@@ -5,25 +5,41 @@ import numpy as np
 from typing import Dict, Any
 from core.interfaces import FairnessMetric
 
+def ensure_series(df, col_name):
+    """
+    Ensures that a column selection from a DataFrame returns a 1D Series,
+    even if duplicate column names exist.
+    """
+    series = df[col_name]
+    if isinstance(series, pd.DataFrame):
+        return series.iloc[:, 0]
+    return series
+
 def _encode_if_needed(df, protected_attribute, privileged_group, unprivileged_group):
     """
     Helper to encode categorical protected attributes to numeric (1/0) for AIF360.
     """
-    if pd.api.types.is_numeric_dtype(df[protected_attribute]):
+    s_prot = ensure_series(df, protected_attribute)
+    
+    if pd.api.types.is_numeric_dtype(s_prot):
         return df, privileged_group, unprivileged_group
 
     df_encoded = df.copy()
-    mask_priv = df_encoded[protected_attribute] == privileged_group
+    mask_priv = s_prot == privileged_group
     
     if isinstance(unprivileged_group, list):
-        mask_unpriv = df_encoded[protected_attribute].isin(unprivileged_group)
+        mask_unpriv = s_prot.isin(unprivileged_group)
     else:
-        mask_unpriv = df_encoded[protected_attribute] == unprivileged_group
+        mask_unpriv = s_prot == unprivileged_group
         
     new_col = np.zeros(len(df_encoded), dtype=float)
     new_col[mask_priv] = 1.0
     new_col[mask_unpriv] = 0.0
     
+    # We drop the old one and add the new one to ensure no duplicates if it was a DF
+    if isinstance(df[protected_attribute], pd.DataFrame):
+        df_encoded = df_encoded.drop(columns=[protected_attribute])
+        
     df_encoded[protected_attribute] = new_col
     new_priv_group = 1.0
     
@@ -39,10 +55,17 @@ class GroupFairnessMetric(FairnessMetric):
                privileged_group: Any, unprivileged_group: Any) -> Dict[str, float]:
         df_use, priv_val, unpriv_val = _encode_if_needed(df, protected_attribute, privileged_group, unprivileged_group)
         
+        # Ensure target_col is also a series
+        s_target = ensure_series(df_use, target_col)
+        df_dataset = pd.DataFrame({
+            target_col: s_target,
+            protected_attribute: ensure_series(df_use, protected_attribute)
+        })
+
         dataset = BinaryLabelDataset(
             favorable_label=1,
             unfavorable_label=0,
-            df=df_use[[target_col, protected_attribute]],
+            df=df_dataset,
             label_names=[target_col],
             protected_attribute_names=[protected_attribute]
         )
@@ -74,10 +97,20 @@ class ClassificationFairnessMetric(FairnessMetric):
         df_true_use, priv_val, unpriv_val = _encode_if_needed(df_true_clean, protected_attribute, privileged_group, unprivileged_group)
         df_pred_use, _, _ = _encode_if_needed(df_pred_clean, protected_attribute, privileged_group, unprivileged_group)
 
+        # Build clean DataFrames for AIF360 to avoid any duplicate column issues
+        df_true_dataset = pd.DataFrame({
+            target_col: ensure_series(df_true_use, target_col),
+            protected_attribute: ensure_series(df_true_use, protected_attribute)
+        })
+        df_pred_dataset = pd.DataFrame({
+            target_col: ensure_series(df_pred_use, target_col),
+            protected_attribute: ensure_series(df_pred_use, protected_attribute)
+        })
+
         dataset_true = BinaryLabelDataset(
             favorable_label=1,
             unfavorable_label=0,
-            df=df_true_use[[target_col, protected_attribute]],
+            df=df_true_dataset,
             label_names=[target_col],
             protected_attribute_names=[protected_attribute]
         )
@@ -85,7 +118,7 @@ class ClassificationFairnessMetric(FairnessMetric):
         dataset_pred = BinaryLabelDataset(
             favorable_label=1,
             unfavorable_label=0,
-            df=df_pred_use[[target_col, protected_attribute]],
+            df=df_pred_dataset,
             label_names=[target_col],
             protected_attribute_names=[protected_attribute]
         )

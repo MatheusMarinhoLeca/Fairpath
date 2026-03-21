@@ -7,12 +7,23 @@ import sys
 import contextlib
 from imblearn.over_sampling import SMOTE
 from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, Normalizer
+from sklearn.impute import SimpleImputer
 from sdv.single_table import GaussianCopulaSynthesizer
 from sdv.metadata import Metadata
 from sdv.sampling import Condition
 from typing import Any, List, Optional
 from core.interfaces import MitigationStrategy
+
+def ensure_series(df, col_name):
+    """
+    Ensures that a column selection from a DataFrame returns a 1D Series,
+    even if duplicate column names exist.
+    """
+    series = df[col_name]
+    if isinstance(series, pd.DataFrame):
+        return series.iloc[:, 0]
+    return series
 
 @contextlib.contextmanager
 def silence_output():
@@ -51,7 +62,8 @@ class ResamplingMitigation(MitigationStrategy):
 
         total_per_a = work_df.groupby(sensitive_col).size()
         max_total = total_per_a.max()
-        target_pos_rate = pd.to_numeric(work_df['target'], errors='coerce').mean()
+        # Ensure we drop NaNs for the target rate calculation
+        target_pos_rate = pd.to_numeric(work_df['target'], errors='coerce').dropna().mean()
 
         df_resampled = []
         for a_val in work_df[sensitive_col].unique():
@@ -96,9 +108,21 @@ class RelabelingMitigation(MitigationStrategy):
         X_num = X.select_dtypes(include=[np.number])
         y = df_work[target_col]
 
-        # Fix ConvergenceWarning by scaling data
+        # Handle NaNs before LogisticRegression
+        if X_num.isnull().sum().sum() > 0:
+            # Handle all-NaN columns specifically to avoid SimpleImputer dropping them
+            all_nan_cols = X_num.columns[X_num.isnull().all()]
+            if not all_nan_cols.empty:
+                X_num[all_nan_cols] = 0
+            
+            imputer = SimpleImputer(strategy='mean')
+            X_num = pd.DataFrame(imputer.fit_transform(X_num), columns=X_num.columns, index=X_num.index)
+
+        # Fix ConvergenceWarning by scaling and normalizing data
         scaler = StandardScaler()
+        normalizer = Normalizer()
         X_scaled = scaler.fit_transform(X_num)
+        X_scaled = normalizer.fit_transform(X_scaled)
 
         ranker = LogisticRegression(max_iter=1000)
         # LogisticRegression handles categorical y if it's 0/1, but we pass it as is.
@@ -195,43 +219,61 @@ class SyntheticMitigation(MitigationStrategy):
         # We need to preserve the mapping for the sensitive attribute to reconstruct evaluation columns.
         df_work = df.copy()
 
+        # Ensure we have 1D series for key columns even if duplicates exist
+        s_target = ensure_series(df_work, target_col)
+        
         # If sensitive_col is missing (could be one-hot encoded), we try to find it
         if sensitive_col not in df_work.columns and fairness_eval_col in df_work.columns:
             # Re-create sensitive_col from fairness_eval_col
-            df_work[sensitive_col] = df_work[fairness_eval_col].copy()
+            df_work[sensitive_col] = ensure_series(df_work, fairness_eval_col).copy()
 
         # If sensitive_col is still missing, we can't do SMOTE balancing on it
         if sensitive_col not in df_work.columns:
             return None
+            
+        s_sens = ensure_series(df_work, sensitive_col)
 
         # If sensitive_col is categorical, encode it temporarily
-        is_sens_numeric = pd.api.types.is_numeric_dtype(df_work[sensitive_col])
+        is_sens_numeric = pd.api.types.is_numeric_dtype(s_sens)
         if not is_sens_numeric:
             from sklearn.preprocessing import LabelEncoder
             le_sens = LabelEncoder()
-            df_work[sensitive_col] = le_sens.fit_transform(df_work[sensitive_col].astype(str))
+            # Use the Series directly to ensure 1D input to fit_transform
+            df_work[sensitive_col] = le_sens.fit_transform(s_sens.astype(str))
+            s_sens = df_work[sensitive_col] # Update reference
 
         # Build a mapping from sensitive column to fairness eval column
-        # This is critical if sensitive_col was label-encoded (numeric) but fairness_eval_col is categorical (strings)
-        # We build it AFTER temporary label encoding to ensure mapping keys match SMOTE results
         mapping_sens_to_eval = {}
         if fairness_eval_col in df_work.columns:
+            s_eval = ensure_series(df_work, fairness_eval_col)
             # Capture mapping from unique pairs
-            pairs = df_work[[sensitive_col, fairness_eval_col]].drop_duplicates()
+            pairs = pd.DataFrame({sensitive_col: s_sens, fairness_eval_col: s_eval}).drop_duplicates()
             mapping_sens_to_eval = dict(zip(pairs[sensitive_col], pairs[fairness_eval_col]))
 
         # Select numeric columns for X features
-        # Exclude target and the dedicated fairness eval col (we'll reconstruct it)
         df_numeric = df_work.select_dtypes(include=[np.number])
 
+        # Handle NaNs before SMOTE
+        if df_numeric.isnull().sum().sum() > 0:
+            # Handle all-NaN columns specifically to avoid SimpleImputer dropping them
+            all_nan_cols = df_numeric.columns[df_numeric.isnull().all()]
+            if not all_nan_cols.empty:
+                df_numeric[all_nan_cols] = 0
+            
+            imputer = SimpleImputer(strategy='mean')
+            df_numeric = pd.DataFrame(imputer.fit_transform(df_numeric), columns=df_numeric.columns, index=df_numeric.index)
+
         # Create combined labels for balancing subgroups
-        combined_col = df_work[sensitive_col].astype(str) + "_" + df_work[target_col].astype(str)
+        combined_col = s_sens.astype(str) + "_" + s_target.astype(str)
         y_combined = combined_col.rename('_combined')
 
         # Drop target and any special eval columns from features to avoid interpolation issues
+        # Also drop sensitive_col if it's numeric to avoid duplicate columns in final output
         cols_to_drop = [target_col]
         if fairness_eval_col in df_numeric.columns:
             cols_to_drop.append(fairness_eval_col)
+        if sensitive_col in df_numeric.columns:
+            cols_to_drop.append(sensitive_col)
 
         X = df_numeric.drop(columns=cols_to_drop)
 
@@ -259,14 +301,14 @@ class SyntheticMitigation(MitigationStrategy):
 
         # Reconstruct all new columns as a dict first for a single concat
         new_cols = {}
-        
+
         # Target reconstruction
-        new_cols[target_col] = res_combined_parts[1].astype(df[target_col].dtype).values
+        new_cols[target_col] = res_combined_parts[1].astype(ensure_series(df, target_col).dtype).values
 
         # Sensitive attribute reconstruction
         sens_res_raw = res_combined_parts[0]
         if is_sens_numeric:
-            new_cols[sensitive_col] = sens_res_raw.astype(df[sensitive_col].dtype).values
+            new_cols[sensitive_col] = sens_res_raw.astype(ensure_series(df, sensitive_col).dtype).values
         else:
             new_cols[sensitive_col] = le_sens.inverse_transform(sens_res_raw.astype(int))
 
@@ -277,7 +319,7 @@ class SyntheticMitigation(MitigationStrategy):
                 # If sens_res_raw (interpolated) has a value not in mapping (rounding error?), map to nearest
                 # But SMOTE on label-encoded values usually returns the same integers.
                 # However, res_combined_parts[0] is string, so we convert back to key type.
-                key_type = df_work[sensitive_col].dtype
+                key_type = ensure_series(df_work, sensitive_col).dtype
                 new_cols[fairness_eval_col] = sens_res_raw.astype(key_type).map(mapping_sens_to_eval).values
             else:
                 new_cols[fairness_eval_col] = new_cols[sensitive_col].copy()

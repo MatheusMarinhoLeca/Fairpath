@@ -166,7 +166,7 @@ class TerminalUI:
         return get_user_choice(metric_options, title="Select Fairness Metric")
 
     def get_model_choice(self) -> str:
-        model_options = {'1': 'Logistic Regression', '2': 'Random Forest', '3': 'Gradient Boosting (GBM)', '4': 'Support Vector Machine (SVM)'}
+        model_options = {'1': 'Logistic Regression', '2': 'Random Forest', '3': 'Gradient Boosting (GBM)', '4': 'Linear Support Vector Machine (LinearSVC)'}
         return get_user_choice(model_options, title="Select Model Type")
 
     def get_mitigation_method(self) -> str:

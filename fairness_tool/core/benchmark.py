@@ -125,7 +125,7 @@ class BenchmarkEngine:
         missing_strategies = ['mode']
         outlier_strategies = ['iqr']
         encoding_strategies = ['one-hot']
-        models = ['logistic', 'random_forest', 'gbm', 'svm']
+        models = ['logistic', 'random_forest', 'gbm', 'linear_svc']
         mitigations = [
             ('none', None),
             ('resampling_over', 'oversample'),

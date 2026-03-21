@@ -318,7 +318,7 @@ class WorkflowController:
         self.context.selections['fairness']['specific_metric'] = metric_labels.get(self.context.metric_choice, "Skipped")
         
         m_choice = self.ui.get_model_choice()
-        model_map = {'1': 'logistic', '2': 'random_forest', '3': 'gbm', '4': 'svm'}
+        model_map = {'1': 'logistic', '2': 'random_forest', '3': 'gbm', '4': 'linear_svc'}
         self.context.model_choice = model_map[m_choice]
         
         self.ui.wait_for_user("\nPress Enter to compute baseline...")
