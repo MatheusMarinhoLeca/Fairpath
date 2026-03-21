@@ -11,19 +11,28 @@ from core.interfaces import ModelTrainer
 from evaluation.performance import evaluate_classification
 
 class DefaultModelTrainer(ModelTrainer):
-    def train(self, X, y, model_type='logistic') -> Tuple[Any, Any, Any, Any, Any, Any, Any, Dict[str, float]]:
+    def train(self, X, y, model_type='logistic', X_val=None, y_val=None, X_test=None, y_test=None) -> Tuple[Any, Any, Any, Any, Any, Any, Any, Dict[str, float]]:
         """
         Trains a model and returns (model, X_val, y_val, X_test, y_test, y_prob_val, y_prob_test, train_metrics)
         """
-        X_train_val, X_test, y_train_val, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-        X_train, X_val, y_train, y_val = train_test_split(X_train_val, y_train_val, test_size=0.25, random_state=42)
+        if X_test is not None and y_test is not None:
+            # Pre-split data provided. X and y are treated as X_train, y_train.
+            X_train = X
+            y_train = y
+            if X_val is None or y_val is None:
+                # Create validation split from training data if not provided
+                X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.25, random_state=42)
+        else:
+            # Standard split
+            X_train_val, X_test, y_train_val, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+            X_train, X_val, y_train, y_val = train_test_split(X_train_val, y_train_val, test_size=0.25, random_state=42)
         
         # Scale and Normalize data
         scaler = StandardScaler()
         normalizer = Normalizer()
         
         # Capture columns and indices if input is a DataFrame
-        is_df = isinstance(X, pd.DataFrame)
+        is_df = isinstance(X_train, pd.DataFrame)
         if is_df:
             X_train_cols, X_train_idx = X_train.columns, X_train.index
             X_val_cols, X_val_idx = X_val.columns, X_val.index
@@ -50,10 +59,10 @@ class DefaultModelTrainer(ModelTrainer):
         
         if model_type == 'logistic':
             # Explicitly set L2 regularization and high max_iter for stability
-            model = LogisticRegression(penalty='l2', C=1.0, solver='lbfgs', max_iter=10000, random_state=42)
+            model = LogisticRegression(C=1.0, solver='lbfgs', max_iter=10000, random_state=42)
         elif model_type == 'random_forest':
-            # Reduced max_depth and added min_samples_leaf to prevent overfitting on small datasets
-            model = RandomForestClassifier(n_estimators=100, max_depth=8, min_samples_split=5, min_samples_leaf=2, random_state=42)
+            # Added n_jobs=-1 to parallelize tree building
+            model = RandomForestClassifier(n_estimators=100, max_depth=8, min_samples_split=5, min_samples_leaf=2, random_state=42, n_jobs=-1)
         elif model_type == 'gbm':
             model = HistGradientBoostingClassifier(
                 max_iter=1000, 
@@ -69,10 +78,10 @@ class DefaultModelTrainer(ModelTrainer):
         else:
             raise ValueError(f"Unknown model type: {model_type}")
         
-        # Perform Cross-Validation on the training set
+        # Perform Cross-Validation on the training set in parallel (n_jobs=-1)
         skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
         try:
-            cv_scores = cross_val_score(model, X_train_final, y_train, cv=skf, scoring='accuracy')
+            cv_scores = cross_val_score(model, X_train_final, y_train, cv=skf, scoring='accuracy', n_jobs=-1)
             cv_mean = cv_scores.mean()
             cv_std = cv_scores.std()
         except Exception:

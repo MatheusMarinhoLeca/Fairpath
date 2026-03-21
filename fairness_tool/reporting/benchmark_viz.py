@@ -2,6 +2,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
+import warnings
+
+# Suppress seaborn PendingDeprecationWarning (vert vs orientation)
+warnings.filterwarnings("ignore", category=PendingDeprecationWarning, module="seaborn")
 from typing import List, Optional, Tuple, Dict, Any
 import numpy as np
 from reportlab.lib.pagesizes import letter

@@ -6,6 +6,10 @@ class ProjectContext:
     """Encapsulates the current state of the fairness project."""
     
     def __init__(self):
+        self.reset()
+
+    def reset(self):
+        """Resets the context to its initial state."""
         self.df: Optional[pd.DataFrame] = None
         self.original_df: Optional[pd.DataFrame] = None
         self.target_col: Optional[str] = None

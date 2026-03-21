@@ -44,7 +44,7 @@ from models.classification import DefaultModelTrainer
 from fairness.metrics import GroupFairnessMetric, ClassificationFairnessMetric
 from fairness.mitigation import ResamplingMitigation, RelabelingMitigation, SyntheticMitigation
 from data import create_composite_attribute
-
+from data.validator import check_duplicates
 class BenchmarkEngine:
     def __init__(self, num_runs: int, debug_sample_limit: Optional[int] = None):
         self.num_runs = num_runs
@@ -159,6 +159,12 @@ class BenchmarkEngine:
         start_time = time.time()
         
         for ds_name, df_original, target_col, sensitive_attrs, privileged_groups_meta in datasets_to_run:
+            # Check for duplicates in original dataset
+            has_dups, dup_count = check_duplicates(df_original)
+            if has_dups:
+                print(f"Warning: Dataset '{ds_name}' contains {dup_count} duplicate rows.")
+                print("         These duplicates might affect leakage analysis if not handled.")
+
             # Prepare metadata for display
             features = [col for col in df_original.columns if col != target_col]
             feature_str = ", ".join(features)
@@ -334,6 +340,9 @@ class BenchmarkEngine:
         if target_col in cat_cols: cat_cols.remove(target_col)
         if fairness_eval_col in cat_cols: cat_cols.remove(fairness_eval_col)
         
+        # Exclude sensitive attribute so it remains for mitigation (it will be encoded later)
+        if composite_sens_col in cat_cols: cat_cols.remove(composite_sens_col)
+        
         if enc_strat == 'one-hot' and cat_cols:
             df = one_hot_encode(df, target_col, columns=cat_cols)
         elif enc_strat == 'label' and cat_cols:
@@ -343,57 +352,88 @@ class BenchmarkEngine:
             from sklearn.preprocessing import LabelEncoder
             df[target_col] = LabelEncoder().fit_transform(df[target_col].astype(str))
 
-        # 5. Bias Mitigation
+        # 5. Split BEFORE Mitigation
+        from sklearn.model_selection import train_test_split
+        # Using a fixed random state for reproducibility within the run (but run_num could vary it if desired)
+        # To vary by run_num, we can add it to the state or just use it.
+        df_train, df_test = train_test_split(df, test_size=0.2, random_state=42 + run_num)
+
+        # 6. Bias Mitigation (TRAIN ONLY)
         # Mitigation should use the composite_sens_col (which might be encoded/binarized already)
         if mit_name == 'resampling_over' or mit_name == 'resampling_under':
             mitigator = ResamplingMitigation(mit_sub)
-            df = mitigator.mitigate(df, target_col, composite_sens_col, 
+            df_train = mitigator.mitigate(df_train, target_col, composite_sens_col, 
                                    1 if bin_trans else privileged_val_raw, 
                                    [0] if bin_trans else eval_unpriv_vals)
         elif mit_name == 'relabeling':
             mitigator = RelabelingMitigation()
-            df = mitigator.mitigate(df, target_col, composite_sens_col, 
+            df_train = mitigator.mitigate(df_train, target_col, composite_sens_col, 
                                    1 if bin_trans else privileged_val_raw, 
                                    [0] if bin_trans else eval_unpriv_vals)
         elif mit_name.startswith('synthetic'):
             mitigator = SyntheticMitigation(mit_sub)
-            df = mitigator.mitigate(df, target_col, composite_sens_col, 
+            df_train = mitigator.mitigate(df_train, target_col, composite_sens_col, 
                                    1 if bin_trans else privileged_val_raw, 
                                    [0] if bin_trans else eval_unpriv_vals)
         
-        # 6. Model Training & Evaluation
-        # Drop target and fairness_eval_col from features
-        X = df.drop(columns=[target_col, fairness_eval_col])
-        y = df[target_col]
+        # 7. Model Training & Evaluation
         
-        # Ensure all columns in X are numeric
-        cat_cols_remaining = list(X.select_dtypes(exclude=['number']).columns)
-        if cat_cols_remaining:
-             X = one_hot_encode(X, None, columns=cat_cols_remaining)
-             
-        X_num = X.select_dtypes(include=[np.number])
-        if X_num.isnull().sum().sum() > 0:
-            X_num = X_num.fillna(X_num.mean())
+        def prepare_xy(df_in):
+            # Drop target and fairness_eval_col from features
+            X = df_in.drop(columns=[target_col, fairness_eval_col])
+            y = df_in[target_col]
             
-        from sklearn.model_selection import train_test_split
-        _, _, _, _, _, test_idx = train_test_split(
-            X_num, y, df.index, test_size=0.2, random_state=42
-        )
+            # Ensure all columns in X are numeric
+            cat_cols_remaining = list(X.select_dtypes(exclude=['number']).columns)
+            if cat_cols_remaining:
+                 X = one_hot_encode(X, None, columns=cat_cols_remaining)
+                 
+            X_num = X.select_dtypes(include=[np.number])
+            # Handle potential NaNs introduced by mitigation or remaining
+            if X_num.isnull().sum().sum() > 0:
+                X_num = X_num.fillna(X_num.mean())
+            return X_num, y
+
+        X_train, y_train = prepare_xy(df_train)
+        X_test_num, y_test = prepare_xy(df_test)
         
+        # Ensure columns match between train and test (mitigation might have dropped/added cols?)
+        # Specifically one-hot encoding on subsets might cause mismatch if we did it here.
+        # But we did one-hot on FULL df in Step 4, so columns should be consistent 
+        # unless mitigation drops them (Relabeling drops some? No. Resampling preserves.)
+        # Synthetic might add columns? No, it preserves.
+        # However, prepare_xy logic above: `cat_cols_remaining` -> one_hot_encode.
+        # If Step 4 didn't catch everything, this might cause mismatch.
+        # But we did `one_hot_encode(df)` earlier.
+        # Let's align columns to be safe.
+        missing_cols = set(X_train.columns) - set(X_test_num.columns)
+        for c in missing_cols:
+            X_test_num[c] = 0
+        X_test_num = X_test_num[X_train.columns] # Reorder
+
         # Updated to unpack 8 values
-        model, X_val, y_val, X_test_scaled, y_test, _, _, train_metrics = self.trainer.train(X_num, y, model_name)
+        model, X_val, y_val, X_test_scaled, y_test, _, _, train_metrics = self.trainer.train(
+            X_train, y_train, model_name,
+            X_test=X_test_num, y_test=y_test
+        )
         
         y_pred = model.predict(X_test_scaled)
         perf_metrics = self.trainer.evaluate(model, X_test_scaled, y_test)
         
         # Fairness Metrics (using fairness_eval_col)
-        sens_test = df.loc[test_idx, fairness_eval_col]
+        # We need to get fairness_eval_col from df_test, but we need to align indices with X_test_scaled/y_test
+        # X_test_scaled is a numpy array or dataframe? Trainer returns it as DataFrame if input was DF.
+        # prepare_xy returns DataFrame. Trainer preserves it.
+        # So X_test_scaled should have the same index as X_test_num, which has same index as df_test.
+        sens_test = df_test.loc[X_test_scaled.index, fairness_eval_col]
         
-        df_pred = pd.DataFrame(X_test_scaled, columns=X_num.columns)
+        # df_pred construction for fairness metrics
+        # ClassificationFairnessMetric expects a DataFrame with prediction and truth
+        df_pred = pd.DataFrame(X_test_scaled, columns=X_train.columns, index=X_test_scaled.index)
         df_pred[target_col] = y_pred
         df_pred[fairness_eval_col] = sens_test.values
         
-        df_true = pd.DataFrame({target_col: y_test.values, fairness_eval_col: sens_test.values})
+        df_true = pd.DataFrame({target_col: y_test.values, fairness_eval_col: sens_test.values}, index=y_test.index)
         
         # Compute BOTH metric types
         group_metric_impl = GroupFairnessMetric()

@@ -14,9 +14,9 @@ def one_hot_encode(df, target_col=None, columns=None):
         return df
         
     # Apply get_dummies. 
-    # To keep original columns, we generate dummies and then concat.
+    # Drop original columns to avoid duplicates.
     dummies = pd.get_dummies(df[columns_to_encode], prefix=columns_to_encode, drop_first=False, dtype=int)
-    df = pd.concat([df, dummies], axis=1)
+    df = pd.concat([df.drop(columns=columns_to_encode), dummies], axis=1)
     
     return df
 
