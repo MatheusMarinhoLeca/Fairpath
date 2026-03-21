@@ -339,13 +339,34 @@ class WorkflowController:
                 self.ui.display_message("Operation aborted by user.")
                 return
 
-        model, X_val, y_val, X_test, y_test, y_prob_val, y_prob_test = self.trainer.train(X, y, self.context.model_choice)
+        # Updated to unpack 8 values
+        model, X_val, y_val, X_test, y_test, y_prob_val, y_prob_test, train_metrics = self.trainer.train(X, y, self.context.model_choice)
+        
         self.context.y_test_bl = y_test
         self.context.y_pred_bl = model.predict(X_test)
         self.context.y_prob_bl = y_prob_test
         
+        # Performance metrics
+        test_metrics = self.trainer.evaluate(model, X_test, y_test)
+        
+        # Overfitting detection
+        train_acc = train_metrics.get('Accuracy', 0)
+        cv_acc = train_metrics.get('CV Mean Accuracy', 0)
+        test_acc = test_metrics.get('Accuracy', 0)
+        
+        # More robust check using CV if available
+        comparison_acc = cv_acc if cv_acc > 0 else train_acc
+        
+        if (comparison_acc - test_acc) > 0.10:
+            self.ui.display_message(f"\n[!] WARNING: Potential Overfitting detected.")
+            if cv_acc > 0:
+                 self.ui.display_message(f"    CV Accuracy: {cv_acc:.4f} | Test Accuracy: {test_acc:.4f}")
+            else:
+                 self.ui.display_message(f"    Train Accuracy: {train_acc:.4f} | Test Accuracy: {test_acc:.4f}")
+            self.ui.display_message("    Consider reducing model complexity or increasing regularization.")
+
         self.context.metrics_baseline.update({f"Val {k}": v for k, v in self.trainer.evaluate(model, X_val, y_val).items()})
-        self.context.metrics_baseline.update({f"Test {k}": v for k, v in self.trainer.evaluate(model, X_test, y_test).items()})
+        self.context.metrics_baseline.update({f"Test {k}": v for k, v in test_metrics.items()})
         
         sens_test = self.context.df.loc[X_test.index, self.context.sensitive_col]
         temp_df = X_test.copy(); temp_df[self.context.target_col] = self.context.y_pred_bl; temp_df[self.context.sensitive_col] = sens_test.values
