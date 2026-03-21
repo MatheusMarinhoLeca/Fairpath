@@ -380,7 +380,8 @@ class BenchmarkEngine:
             X_num, y, df.index, test_size=0.2, random_state=42
         )
         
-        model, X_val, y_val, X_test_scaled, y_test, _, _ = self.trainer.train(X_num, y, model_name)
+        # Updated to unpack 8 values
+        model, X_val, y_val, X_test_scaled, y_test, _, _, train_metrics = self.trainer.train(X_num, y, model_name)
         
         y_pred = model.predict(X_test_scaled)
         perf_metrics = self.trainer.evaluate(model, X_test_scaled, y_test)
@@ -420,7 +421,9 @@ class BenchmarkEngine:
             'Run Number': run_num,
             'Sensitive Attributes': ", ".join(sensitive_attrs),
             'Chosen Sensitive Attribute': composite_sens_col,
-            'Privileged Group Value': display_priv_val
+            'Privileged Group Value': display_priv_val,
+            'CV Mean Accuracy': train_metrics.get('CV Mean Accuracy', 0),
+            'CV Std Accuracy': train_metrics.get('CV Std Accuracy', 0)
         }
         result.update(perf_metrics)
         result.update(fair_metrics)
