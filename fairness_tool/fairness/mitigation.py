@@ -315,6 +315,7 @@ class SyntheticMitigation(MitigationStrategy):
 
         priv_val = privileged_group[0] if isinstance(privileged_group, list) else privileged_group
 
+        # 1. Flip the main sensitive column
         if isinstance(unprivileged_groups, list):
             mask_priv = df_cf[sensitive_col] == priv_val
             mask_unpriv = df_cf[sensitive_col].isin(unprivileged_groups)
@@ -326,6 +327,24 @@ class SyntheticMitigation(MitigationStrategy):
             mask_unpriv = df_cf[sensitive_col] == unprivileged_groups
             df_cf.loc[mask_priv, sensitive_col] = unprivileged_groups
             df_cf.loc[mask_unpriv, sensitive_col] = priv_val
+
+        # 2. Synchronize One-Hot Encoded columns if they exist
+        # We need to ensure that if 'race' became 'African-American', then 'race_African-American' becomes 1 
+        # and 'race_Caucasian' becomes 0.
+        
+        # Identify potential one-hot columns for this sensitive attribute
+        # We assume the standard format "{sensitive_col}_{value}"
+        unique_vals = df[sensitive_col].unique()
+        for val in unique_vals:
+            # Construct the expected one-hot column name
+            # Note: This simple check might need robustness if values contain special chars, 
+            # but it covers standard pandas get_dummies behavior.
+            oh_col = f"{sensitive_col}_{val}"
+            
+            if oh_col in df_cf.columns:
+                # Update the one-hot column based on the NEW values in sensitive_col
+                # If sensitive_col is now 'val', set oh_col to 1, else 0
+                df_cf[oh_col] = (df_cf[sensitive_col] == val).astype(int)
 
         # Update the fairness evaluation column in the counterfactual data too
         fairness_eval_col = FAIRNESS_EVAL_COL

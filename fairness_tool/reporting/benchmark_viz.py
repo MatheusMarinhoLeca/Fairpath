@@ -72,7 +72,7 @@ class BenchmarkVisualizer:
         plt.figure(figsize=(10, 6))
         
         # Create scatter plot
-        sns.scatterplot(
+        ax = sns.scatterplot(
             data=df_plot,
             x=x_metric,
             y=y_metric,
@@ -84,7 +84,12 @@ class BenchmarkVisualizer:
         
         plt.title(f'{y_metric} vs {x_metric} Trade-off' + (f' ({dataset})' if dataset else ''))
         plt.axhline(0, color='gray', linestyle='--', alpha=0.5)  # Zero line for fairness
-        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        
+        # Check if legend handles exist before creating legend
+        handles, labels = ax.get_legend_handles_labels()
+        if handles:
+            plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        
         plt.tight_layout()
         
         if save_path:
@@ -146,24 +151,33 @@ class BenchmarkVisualizer:
             print(f"Metric {metric} not found.")
             return
 
+        # Check for empty data or all-NaN metric column to prevent seaborn errors
+        if df_plot.empty or df_plot[metric].dropna().empty:
+            print(f"No valid data available for metric '{metric}' in dataset '{dataset}'. Skipping distribution plot.")
+            return
+
         plt.figure(figsize=(10, 6))
-        sns.boxplot(
-            data=df_plot,
-            x=group_by,
-            y=metric,
-            hue='Mitigation Technique'
-        )
-        
-        plt.title(f'Distribution of {metric}' + (f' ({dataset})' if dataset else ''))
-        plt.xticks(rotation=45)
-        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.tight_layout()
-        
-        if save_path:
-            plt.savefig(save_path)
+        try:
+            sns.boxplot(
+                data=df_plot,
+                x=group_by,
+                y=metric,
+                hue='Mitigation Technique'
+            )
+            
+            plt.title(f'Distribution of {metric}' + (f' ({dataset})' if dataset else ''))
+            plt.xticks(rotation=45)
+            plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            plt.tight_layout()
+            
+            if save_path:
+                plt.savefig(save_path)
+                plt.close()
+            else:
+                plt.show()
+        except Exception as e:
+            print(f"Error plotting distribution for {metric}: {e}")
             plt.close()
-        else:
-            plt.show()
             
     def plot_heatmap(self,
                     metric: str,
@@ -179,24 +193,33 @@ class BenchmarkVisualizer:
             return
 
         # Aggregate data
-        pivot_table = df_plot.pivot_table(
-            values=metric, 
-            index=row_factor, 
-            columns=col_factor, 
-            aggfunc='mean'
-        )
-        
-        plt.figure(figsize=(10, 8))
-        sns.heatmap(pivot_table, annot=True, fmt=".3f", cmap="coolwarm", cbar_kws={'label': metric})
-        
-        plt.title(f'Average {metric} Heatmap' + (f' ({dataset})' if dataset else ''))
-        plt.tight_layout()
-        
-        if save_path:
-            plt.savefig(save_path)
+        try:
+            pivot_table = df_plot.pivot_table(
+                values=metric, 
+                index=row_factor, 
+                columns=col_factor, 
+                aggfunc='mean'
+            )
+            
+            # Check for empty pivot table to avoid seaborn errors
+            if pivot_table.empty or pivot_table.dropna(how='all').empty:
+                print(f"No valid data available for heatmap of '{metric}' in dataset '{dataset}'. Skipping.")
+                return
+
+            plt.figure(figsize=(10, 8))
+            sns.heatmap(pivot_table, annot=True, fmt=".3f", cmap="coolwarm", cbar_kws={'label': metric})
+            
+            plt.title(f'Average {metric} Heatmap' + (f' ({dataset})' if dataset else ''))
+            plt.tight_layout()
+            
+            if save_path:
+                plt.savefig(save_path)
+                plt.close()
+            else:
+                plt.show()
+        except Exception as e:
+            print(f"Error plotting heatmap for {metric}: {e}")
             plt.close()
-        else:
-            plt.show()
 
     def plot_pareto_frontier(self,
                            x_metric: str = 'Accuracy',

@@ -1,7 +1,3 @@
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier, HistGradientBoostingClassifier
-from sklearn.svm import LinearSVC
-from sklearn.calibration import CalibratedClassifierCV
 from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
 from sklearn.preprocessing import StandardScaler, Normalizer
 import pandas as pd
@@ -9,6 +5,7 @@ import numpy as np
 from typing import Dict, Any, Tuple
 from core.interfaces import ModelTrainer
 from evaluation.performance import evaluate_classification
+from .factory import ModelFactory
 
 class DefaultModelTrainer(ModelTrainer):
     def train(self, X, y, model_type='logistic', X_val=None, y_val=None, X_test=None, y_test=None) -> Tuple[Any, Any, Any, Any, Any, Any, Any, Dict[str, float]]:
@@ -21,11 +18,22 @@ class DefaultModelTrainer(ModelTrainer):
             y_train = y
             if X_val is None or y_val is None:
                 # Create validation split from training data if not provided
-                X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.25, random_state=42)
+                try:
+                    X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.25, random_state=42, stratify=y_train)
+                except ValueError:
+                    # Fallback to random split if stratification fails (e.g. class size < 2)
+                    X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.25, random_state=42)
         else:
             # Standard split
-            X_train_val, X_test, y_train_val, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-            X_train, X_val, y_train, y_val = train_test_split(X_train_val, y_train_val, test_size=0.25, random_state=42)
+            try:
+                X_train_val, X_test, y_train_val, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+            except ValueError:
+                 X_train_val, X_test, y_train_val, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+            
+            try:
+                X_train, X_val, y_train, y_val = train_test_split(X_train_val, y_train_val, test_size=0.25, random_state=42, stratify=y_train_val)
+            except ValueError:
+                X_train, X_val, y_train, y_val = train_test_split(X_train_val, y_train_val, test_size=0.25, random_state=42)
         
         # Scale and Normalize data
         scaler = StandardScaler()
@@ -57,26 +65,8 @@ class DefaultModelTrainer(ModelTrainer):
             X_val_final = X_val_scaled
             X_test_final = X_test_scaled
         
-        if model_type == 'logistic':
-            # Explicitly set L2 regularization and high max_iter for stability
-            model = LogisticRegression(C=1.0, solver='lbfgs', max_iter=10000, random_state=42)
-        elif model_type == 'random_forest':
-            # Added n_jobs=-1 to parallelize tree building
-            model = RandomForestClassifier(n_estimators=100, max_depth=8, min_samples_split=5, min_samples_leaf=2, random_state=42, n_jobs=-1)
-        elif model_type == 'gbm':
-            model = HistGradientBoostingClassifier(
-                max_iter=1000, 
-                learning_rate=0.05, # Slower learning rate for better generalization
-                max_depth=4, # Reduced depth
-                l2_regularization=0.5, # Increased regularization
-                n_iter_no_change=20,
-                random_state=42
-            )
-        elif model_type == 'svm' or model_type == 'linear_svc':
-            base_model = LinearSVC(dual="auto", C=0.8, max_iter=30000, random_state=42)
-            model = CalibratedClassifierCV(base_model)
-        else:
-            raise ValueError(f"Unknown model type: {model_type}")
+        # Use Factory to get model
+        model = ModelFactory.get_model(model_type)
         
         # Perform Cross-Validation on the training set in parallel (n_jobs=-1)
         skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
@@ -112,8 +102,4 @@ class DefaultModelTrainer(ModelTrainer):
 # Backward compatibility wrapper
 def train_classifier(X, y, model_type='logistic'):
     res = DefaultModelTrainer().train(X, y, model_type)
-    # Return all 8 values if expected, but many old calls expect 7.
-    # To be safe, we return the full tuple. 
-    # If the user only unpacks 7, it will throw an error. 
-    # I will update the known callers now.
     return res

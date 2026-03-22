@@ -4,6 +4,12 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 import os
 
+def format_val(val):
+    """Helper to round floats to 4 decimal places or return string."""
+    if isinstance(val, float):
+        return f"{val:.4f}"
+    return str(val)
+
 def get_tailored_recommendations(selections, metrics_before, metrics_after):
     recs = []
     
@@ -55,6 +61,8 @@ def generate_pdf_report(filename, stats_before, metrics_before, metrics_after, p
     # Custom styles
     styles.add(ParagraphStyle(name='ItalicNormal', parent=styles['Normal'], fontName='Helvetica-Oblique'))
     styles.add(ParagraphStyle(name='Small', parent=styles['Normal'], fontSize=8, leading=10))
+    styles.add(ParagraphStyle(name='TableCell', parent=styles['Normal'], fontSize=9, leading=11))
+    styles.add(ParagraphStyle(name='TableHeader', parent=styles['Normal'], fontSize=10, leading=12, fontName='Helvetica-Bold', textColor=colors.whitesmoke))
     
     story = []
     
@@ -69,7 +77,7 @@ def generate_pdf_report(filename, stats_before, metrics_before, metrics_after, p
         story.append(Paragraph("1. Configuration Summary", styles['Heading2']))
         story.append(Spacer(1, 6))
         
-        # Preprocessing Explanations
+        # Preprocessing Steps
         prep = selections.get('preprocessing', {})
         story.append(Paragraph("<b>Preprocessing Steps:</b>", styles['Normal']))
         story.append(Paragraph(f"• <b>Feature Selection:</b> {prep.get('feature_selection', 'N/A')}", styles['Normal']))
@@ -88,7 +96,7 @@ def generate_pdf_report(filename, stats_before, metrics_before, metrics_after, p
         story.append(Paragraph(f"• <b>Metric Chosen:</b> {fair.get('specific_metric', 'N/A')}", styles['Normal']))
         story.append(Paragraph(f"• <b>Bias Mitigation:</b> {mit.get('method', 'N/A')}", styles['Normal']))
         
-        # Methodology Logic (Pros/Cons)
+        # Methodology Logic
         story.append(Spacer(1, 12))
         story.append(Paragraph("<b>Methodology Explained:</b>", styles['Normal']))
         
@@ -117,7 +125,7 @@ def generate_pdf_report(filename, stats_before, metrics_before, metrics_after, p
     story.append(Paragraph("2. Dataset Statistics Comparison", styles['Heading2']))
     story.append(Spacer(1, 6))
     
-    stat_comp_data = [['Statistic', 'Baseline', 'Mitigated']]
+    stat_comp_data = [[Paragraph("Statistic", styles['TableHeader']), Paragraph("Baseline", styles['TableHeader']), Paragraph("Mitigated", styles['TableHeader'])]]
     all_stat_keys_set = set(stats_before.keys()) | set((stats_after or {}).keys())
     
     preferred_order = ['Target Variable', 'Features Selected', 'Categorical Features', 'Numerical Features', 'Total Features', 'Total Samples', 'Missing Values']
@@ -128,14 +136,17 @@ def generate_pdf_report(filename, stats_before, metrics_before, metrics_after, p
     for k in all_stat_keys:
         val_b = stats_before.get(k, 'N/A')
         val_m = (stats_after or {}).get(k, 'N/A')
-        stat_comp_data.append([k, str(val_b), str(val_m)])
+        stat_comp_data.append([
+            Paragraph(str(k), styles['TableCell']), 
+            Paragraph(format_val(val_b), styles['TableCell']), 
+            Paragraph(format_val(val_m), styles['TableCell'])
+        ])
         
-    t_stats = Table(stat_comp_data, colWidths=[200, 100, 100])
+    t_stats = Table(stat_comp_data, colWidths=[240, 110, 110])
     t_stats.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.darkgrey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('GRID', (0, 0), (-1, -1), 1, colors.black),
         ('BACKGROUND', (0, 1), (-1, -1), colors.lightgrey),
     ]))
@@ -146,22 +157,23 @@ def generate_pdf_report(filename, stats_before, metrics_before, metrics_after, p
     story.append(Paragraph("3. Fairness & Performance Results", styles['Heading2']))
     story.append(Spacer(1, 6))
     
-    comp_data = [['Metric', 'Baseline', 'Mitigated']]
+    comp_data = [[Paragraph("Metric", styles['TableHeader']), Paragraph("Baseline", styles['TableHeader']), Paragraph("Mitigated", styles['TableHeader'])]]
     all_keys = set(metrics_before.keys()) | set(metrics_after.keys())
     
     for k in sorted(list(all_keys)):
         val_b = metrics_before.get(k, 'N/A')
         val_m = metrics_after.get(k, 'N/A')
-        fmt_b = f"{val_b:.4f}" if isinstance(val_b, float) else str(val_b)
-        fmt_m = f"{val_m:.4f}" if isinstance(val_m, float) else str(val_m)
-        comp_data.append([k, fmt_b, fmt_m])
+        comp_data.append([
+            Paragraph(str(k), styles['TableCell']), 
+            Paragraph(format_val(val_b), styles['TableCell']), 
+            Paragraph(format_val(val_m), styles['TableCell'])
+        ])
         
-    t_comp = Table(comp_data, colWidths=[200, 100, 100])
+    t_comp = Table(comp_data, colWidths=[240, 110, 110])
     t_comp.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('GRID', (0, 0), (-1, -1), 1, colors.black),
     ]))
     story.append(t_comp)
@@ -174,7 +186,6 @@ def generate_pdf_report(filename, stats_before, metrics_before, metrics_after, p
         story.append(Paragraph("4. Visualization Analysis", styles['Heading2']))
         story.append(Spacer(1, 12))
         
-        # Legend/Explanations mapping
         plot_explanations = {
             "Baseline Confusion Matrix": "Shows how often the model correctly predicted the target in the original data. High diagonal values are good.",
             "Mitigated Confusion Matrix": "Shows model performance after mitigation. Compare this to the baseline to see if accuracy was sacrificed for fairness.",
@@ -212,7 +223,6 @@ def generate_pdf_report(filename, stats_before, metrics_before, metrics_after, p
     story.append(Paragraph("5. Recommendations for Next Iterations", styles['Heading2']))
     story.append(Spacer(1, 6))
     
-    # Sub-section: Strategic Suggestions (Dynamic)
     story.append(Paragraph("Strategic Suggestions (Data-Driven):", styles['Heading3']))
     recommendations = get_tailored_recommendations(selections, metrics_before, metrics_after)
     for rec in recommendations:
@@ -221,7 +231,6 @@ def generate_pdf_report(filename, stats_before, metrics_before, metrics_after, p
     
     story.append(Spacer(1, 12))
     
-    # Sub-section: General Best Practices (Static)
     story.append(Paragraph("General Best Practices:", styles['Heading3']))
     general_tips = [
         "<b>Data Collection:</b> If selection rates are highly unequal, consider collecting more samples for the unprivileged group rather than just oversampling existing data to improve model generalization.",

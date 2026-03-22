@@ -22,6 +22,7 @@ from preprocessing.missing_values import impute_missing
 from preprocessing.outliers import remove_outliers_iqr
 from preprocessing.encoding import one_hot_encode, label_encode, binarize_attribute
 from models.classification import DefaultModelTrainer
+from core.experiment import ExperimentRunner
 from fairness.metrics import GroupFairnessMetric, ClassificationFairnessMetric
 from fairness.mitigation import ResamplingMitigation, RelabelingMitigation, SyntheticMitigation
 from reporting.report_builder import generate_pdf_report
@@ -34,6 +35,7 @@ class WorkflowController:
         self.ui = ui
         self.context = context
         self.trainer = DefaultModelTrainer()
+        self.experiment_runner = ExperimentRunner(self.trainer)
 
     def run(self):
         while True:
@@ -77,7 +79,6 @@ class WorkflowController:
             from core.benchmark import BenchmarkEngine
             n_runs = self.ui.get_benchmark_runs()
             
-            # Prompt for debug sample limit
             from utils.menus import get_user_input
             limit_input = get_user_input("Enter sample limit for debugging (press Enter to use full dataset)", lambda x: x == "" or x.isdigit(), allow_empty=True)
             debug_limit = int(limit_input) if limit_input else None
@@ -179,21 +180,27 @@ class WorkflowController:
         self.context.selections['preprocessing']['selected_features_list'] = self.context.selected_features
 
         self.ui.display_message("\nStep 2: Data Cleaning & Encoding")
-        missing_choice = self.ui.ask_handle_missing_values()
-        if missing_choice:
-            strat_labels = {'1': 'Mean/Median', '2': 'Mode', '3': 'Drop'}
-            self.context.selections['preprocessing']['missing_values'] = strat_labels[missing_choice]
-            strategy_map = {'1': 'mean', '2': 'mode', '3': 'drop'}
-            
-            if strategy_map[missing_choice] == 'drop':
-                cols_to_check = (self.context.selected_features + [self.context.target_col]) if self.context.selected_features else None
-                self.context.df = impute_missing(self.context.df, 'drop', columns=cols_to_check)
-                self.context.df = impute_missing(self.context.df, 'mode', columns=None) 
+        
+        # Unified Missing Value Check
+        if self.context.df.isnull().sum().sum() > 0:
+            self.ui.display_message("\nWarning: Missing values detected in the dataset.")
+            missing_choice = self.ui.ask_handle_missing_values()
+            if missing_choice:
+                strat_labels = {'1': 'Mean/Median', '2': 'Mode', '3': 'Drop'}
+                self.context.selections['preprocessing']['missing_values'] = strat_labels[missing_choice]
+                strategy_map = {'1': 'mean', '2': 'mode', '3': 'drop'}
+                
+                if strategy_map[missing_choice] == 'drop':
+                    cols_to_check = (self.context.selected_features + [self.context.target_col]) if self.context.selected_features else None
+                    self.context.df = impute_missing(self.context.df, 'drop', columns=cols_to_check)
+                    self.context.df = impute_missing(self.context.df, 'mode', columns=None) 
+                else:
+                    self.context.df = impute_missing(self.context.df, strategy_map[missing_choice], columns=None)
+                self.ui.display_message(f"✔ Missing values handled. Rows remaining: {len(self.context.df)}")
             else:
-                self.context.df = impute_missing(self.context.df, strategy_map[missing_choice], columns=None)
-            self.ui.display_message(f"✔ Missing values handled. Rows remaining: {len(self.context.df)}")
+                self.context.selections['preprocessing']['missing_values'] = "Skipped"
         else:
-            self.context.selections['preprocessing']['missing_values'] = "Skipped"
+            self.context.selections['preprocessing']['missing_values'] = "None detected"
 
         outlier_choice = self.ui.ask_handle_outliers()
         if outlier_choice == '1':
@@ -205,7 +212,7 @@ class WorkflowController:
             self.context.selections['preprocessing']['outliers'] = "Skipped"
 
         if len(self.context.df) == 0:
-            self.ui.display_message("\nCritical Warning: Preprocessing has removed ALL rows from the dataset.")
+            self.ui.display_message("\nCritical Warning: Preprocessing has removed ALL rows.")
             self.ui.wait_for_user("Press Enter to return to main menu...")
             return
 
@@ -230,7 +237,7 @@ class WorkflowController:
                         else:
                             dummies = [c for c in self.context.df.columns if c.startswith(f"{feat}_")]
                             new_features.extend(dummies)
-                    self.context.selected_features = new_features
+                    self.context.selected_features = list(dict.fromkeys(new_features))
             else:
                 self.context.df = label_encode(self.context.df, self.context.target_col, columns=cols_to_encode)
             self.ui.display_message(f"✔ Encoding applied. Columns: {col_count_before} -> {len(self.context.df.columns)}")
@@ -241,20 +248,12 @@ class WorkflowController:
             remaining_cat = [c for c in self.context.df[self.context.selected_features].select_dtypes(exclude=['number']).columns]
             if remaining_cat:
                 rem_choice = self.ui.get_remaining_categorical_handling(remaining_cat)
-                rem_labels = {
-                    '1': 'Label Encode automatically',
-                    '2': 'Drop from model training',
-                    '3': 'Keep as-is'
-                }
-                self.context.selections['preprocessing']['remaining_categoricals'] = rem_labels.get(rem_choice, "Skipped")
                 if rem_choice == '1':
                     self.context.df = label_encode(self.context.df, self.context.target_col, columns=remaining_cat)
                     self.ui.display_message(f"✔ Automatically encoded remaining features.")
                 elif rem_choice == '2':
                     self.context.selected_features = [f for f in self.context.selected_features if f not in remaining_cat]
                     self.ui.display_message(f"✔ Features dropped from model selection.")
-            else:
-                self.context.selections['preprocessing']['remaining_categoricals'] = "None required (all features numeric)"
         
         if self.context.df[self.context.target_col].dtype == 'object':
              from sklearn.preprocessing import LabelEncoder
@@ -266,7 +265,6 @@ class WorkflowController:
         self.fairness_setup_workflow()
 
     def fairness_setup_workflow(self):
-        # Use original columns for selection in case encoding dropped them
         available_cols = self.context.original_df.columns.tolist()
         potential = [c for c in available_cols if c.lower() in POTENTIAL_SENSITIVE_ATTRIBUTES]
         default_sens = next((c for c in potential if c.lower() == DEFAULT_PRIORITY_SENSITIVE.lower()), None) or (potential[0] if potential else None)
@@ -280,10 +278,8 @@ class WorkflowController:
             except ValueError as e:
                 self.ui.display_message(f"Error: {e}")
 
-        # Restore missing sensitive columns (if dropped by encoding) for fairness analysis
         for col in selected_cols:
             if col not in self.context.df.columns:
-                # Align with current df index to handle potential row drops
                 self.context.df[col] = self.context.original_df.loc[self.context.df.index, col]
 
         self.context.df, self.context.sensitive_col = create_composite_attribute(self.context.df, selected_cols)
@@ -347,66 +343,60 @@ class WorkflowController:
 
     def baseline_evaluation(self):
         self.ui.display_message("\n--- Baseline Evaluation ---")
-        X = self.context.df[self.context.selected_features] if self.context.selected_features else self.context.df.drop(columns=[self.context.target_col])
-        y = self.context.df[self.context.target_col]
         
-        X = X.select_dtypes(include=[np.number])
-        if X.isnull().sum().sum() > 0:
-            self.ui.display_message("\nWarning: Missing values detected in numeric features.")
-            if self.ui.confirm_action("This model requires imputation to proceed. Apply Mean Imputation?"):
-                X = impute_missing(X, strategy='mean')
-                self.ui.display_message("✔ Applied Mean Imputation.")
-            else:
-                self.ui.display_message("Operation aborted by user.")
-                return
-
-        # Updated to unpack 8 values
-        model, X_val, y_val, X_test, y_test, y_prob_val, y_prob_test, train_metrics = self.trainer.train(X, y, self.context.model_choice)
+        from sklearn.model_selection import train_test_split
         
-        self.context.y_test_bl = y_test
-        self.context.y_pred_bl = model.predict(X_test)
-        self.context.y_prob_bl = y_prob_test
+        # Create a composite stratification key to ensure representation of (Sensitive, Target) groups
+        stratify_col = self.context.df[self.context.target_col].astype(str) + "_" + self.context.df[self.context.sensitive_col].astype(str)
         
-        # Performance metrics
-        test_metrics = self.trainer.evaluate(model, X_test, y_test)
+        try:
+            # Try to stratify by both Target and Sensitive Attribute
+            df_train, df_test = train_test_split(self.context.df, test_size=0.2, random_state=42, stratify=stratify_col)
+        except ValueError:
+            try:
+                # Fallback: Stratify only by Target
+                df_train, df_test = train_test_split(self.context.df, test_size=0.2, random_state=42, stratify=self.context.df[self.context.target_col])
+            except ValueError:
+                # Fallback: No stratification (random split)
+                df_train, df_test = train_test_split(self.context.df, test_size=0.2, random_state=42)
         
-        # Overfitting detection
+        results = self.experiment_runner.run(
+            df_train, df_test, 
+            self.context.target_col, 
+            self.context.sensitive_col, 
+            self.context.privileged_group, 
+            self.context.unprivileged_group,
+            self.context.model_choice,
+            mitigation_strategy=None,
+            metric_choice=self.context.metric_choice,
+            selected_features=self.context.selected_features,
+            comparison_mode=self.context.comparison_mode,
+            group_names=self.context.inverse_sensitive_mapping
+        )
+        
+        self.context.y_test_bl = results['y_test']
+        self.context.y_pred_bl = results['y_pred']
+        self.context.y_prob_bl = results['y_prob']
+        
+        test_metrics = results['test_metrics']
+        train_metrics = results['train_metrics']
+        
         train_acc = train_metrics.get('Accuracy', 0)
         cv_acc = train_metrics.get('CV Mean Accuracy', 0)
         test_acc = test_metrics.get('Accuracy', 0)
-        
-        # More robust check using CV if available
         comparison_acc = cv_acc if cv_acc > 0 else train_acc
         
         if (comparison_acc - test_acc) > 0.10:
             self.ui.display_message(f"\n[!] WARNING: Potential Overfitting detected.")
-            if cv_acc > 0:
-                 self.ui.display_message(f"    CV Accuracy: {cv_acc:.4f} | Test Accuracy: {test_acc:.4f}")
-            else:
-                 self.ui.display_message(f"    Train Accuracy: {train_acc:.4f} | Test Accuracy: {test_acc:.4f}")
-            self.ui.display_message("    Consider reducing model complexity or increasing regularization.")
+            self.ui.display_message(f"    Train/CV Accuracy: {comparison_acc} | Test Accuracy: {test_acc}")
 
         if test_acc > 0.95:
-             self.ui.display_message(f"\n[!] CRITICAL WARNING: Extremely high accuracy ({test_acc:.4f}).")
-             self.ui.display_message("    This strongly suggests data leakage (e.g. target variable included in features).")
-             self.ui.display_message("    Please verify your feature selection.")
+             self.ui.display_message(f"\n[!] CRITICAL WARNING: Extremely high accuracy ({test_acc}).")
+             self.ui.display_message("    This suggests data leakage. Please verify your feature selection.")
 
-        self.context.metrics_baseline.update({f"Val {k}": v for k, v in self.trainer.evaluate(model, X_val, y_val).items()})
+        self.context.metrics_baseline.update({f"Val {k}": v for k, v in train_metrics.items() if k != 'CV Mean Accuracy' and k != 'CV Std Accuracy'})
         self.context.metrics_baseline.update({f"Test {k}": v for k, v in test_metrics.items()})
-        
-        sens_test = self.context.df.loc[X_test.index, self.context.sensitive_col]
-        temp_df = X_test.copy(); temp_df[self.context.target_col] = self.context.y_pred_bl; temp_df[self.context.sensitive_col] = sens_test.values
-        
-        # Group Fairness
-        metric_impl = GroupFairnessMetric() if self.context.metric_choice == '1' else ClassificationFairnessMetric(pd.DataFrame({self.context.target_col: y_test.values, self.context.sensitive_col: sens_test.values}))
-        
-        if self.context.comparison_mode == 'combined':
-            self.context.metrics_baseline.update(metric_impl.compute(temp_df, self.context.target_col, self.context.sensitive_col, self.context.privileged_group, self.context.unprivileged_group))
-        else:
-            for val in self.context.unprivileged_group:
-                group_name = self.context.inverse_sensitive_mapping.get(val, str(val)) if self.context.inverse_sensitive_mapping else str(val)
-                res = metric_impl.compute(temp_df, self.context.target_col, self.context.sensitive_col, self.context.privileged_group, val)
-                self.context.metrics_baseline.update({f"[{group_name}] {k}": v for k, v in res.items()})
+        self.context.metrics_baseline.update(results['fairness_metrics'])
              
         self.ui.display_metrics(self.context.metrics_baseline, "Baseline Metrics")
         self.ui.wait_for_user("\nPress Enter to proceed to Mitigation...")
@@ -417,40 +407,24 @@ class WorkflowController:
         self.context.metrics_mitigated = self.context.metrics_baseline.copy()
         
         mit_info = {}
-        # We must split BEFORE mitigation to prevent leakage
         from sklearn.model_selection import train_test_split
-        df_train, df_test = train_test_split(self.context.df, test_size=0.2, random_state=42)
         
+        # Create a composite stratification key (Same as baseline for consistency)
+        stratify_col = self.context.df[self.context.target_col].astype(str) + "_" + self.context.df[self.context.sensitive_col].astype(str)
+        
+        try:
+            df_train, df_test = train_test_split(self.context.df, test_size=0.2, random_state=42, stratify=stratify_col)
+        except ValueError:
+            try:
+                df_train, df_test = train_test_split(self.context.df, test_size=0.2, random_state=42, stratify=self.context.df[self.context.target_col])
+            except ValueError:
+                df_train, df_test = train_test_split(self.context.df, test_size=0.2, random_state=42)
+        
+        strategy = None
         if method_choice == '4':
             self.context.df_improved = self.context.df.copy()
             mit_info['method'] = "None (Baseline)"
-            # For consistency, we just use the original df_train/df_test
-            df_train_mitigated = df_train.copy()
         else:
-            # Check for missing values before proceeding with specific mitigation strategies
-            if method_choice in ['2', '3']: # Relabeling or Synthetic
-                # Check numeric features only as they are the ones imputed
-                numeric_cols = df_train.select_dtypes(include=[np.number]).columns
-                if self.context.target_col in numeric_cols:
-                    numeric_cols = numeric_cols.drop(self.context.target_col)
-                
-                if df_train[numeric_cols].isnull().sum().sum() > 0:
-                    self.ui.display_message("\nWarning: Missing values detected in numeric features.")
-                    self.ui.display_message("Selected mitigation method requires complete data.")
-                    if self.ui.confirm_action("Apply Mean Imputation to proceed?"):
-                        # Impute context dataframe so it propagates to mitigation
-                        # Note: This imputes on full DF in original code, but we should ideally only impute train
-                        # However, for consistency with 'df', we'll update df_train locally
-                        df_train = impute_missing(df_train, strategy='mean')
-                        # We should also impute test using train stats, but for now we'll just impute test independently to avoid crashing
-                        # strictly speaking this is minor leakage but better than crashing or complex refactor
-                        df_test = impute_missing(df_test, strategy='mean') 
-                        self.ui.display_message("✔ Applied Mean Imputation.")
-                    else:
-                        self.ui.display_message("Operation aborted by user.")
-                        return
-
-            strategy = None
             if method_choice == '1':
                 res_type = self.ui.get_resampling_type()
                 strategy = ResamplingMitigation('oversample' if res_type == '1' else 'undersample')
@@ -465,53 +439,27 @@ class WorkflowController:
             
             self.context.selections['mitigation'] = mit_info
             
-            # Apply mitigation ONLY to training set
-            self.ui.display_message("Applying mitigation to training set...")
-            df_train_mitigated = strategy.mitigate(df_train, self.context.target_col, self.context.sensitive_col, self.context.privileged_group, self.context.unprivileged_group)
-            
-            # We set df_improved to the mitigated TRAIN set, so reports show the effect of mitigation
-            self.context.df_improved = df_train_mitigated.copy()
-
-        # Prepare X and y for Train and Test
-        def prepare_xy(df_in):
-            X_temp = df_in[self.context.selected_features] if self.context.selected_features else df_in.drop(columns=[self.context.target_col])
-            X_num = X_temp.select_dtypes(include=['number'])
-            y_temp = df_in[self.context.target_col]
-            return X_num, y_temp
-
-        X_train, y_train = prepare_xy(df_train_mitigated)
-        X_test, y_test = prepare_xy(df_test)
-        
-        # Train using pre-split data
-        # Trainer will split X_train into Train/Val
-        model, X_val, y_val, X_test, y_test, y_prob_val, y_prob_test, _ = self.trainer.train(
-            X_train, y_train, self.context.model_choice, 
-            X_test=X_test, y_test=y_test
+        self.ui.display_message("Executing experiment pipeline...")
+        results = self.experiment_runner.run(
+            df_train, df_test, 
+            self.context.target_col, 
+            self.context.sensitive_col, 
+            self.context.privileged_group, 
+            self.context.unprivileged_group,
+            self.context.model_choice,
+            mitigation_strategy=strategy,
+            metric_choice=self.context.metric_choice,
+            selected_features=self.context.selected_features
         )
         
-        self.context.y_test_mit = y_test
-        self.context.y_pred_mit = model.predict(X_test)
-        self.context.y_prob_mit = y_prob_test
+        self.context.y_test_mit = results['y_test']
+        self.context.y_pred_mit = results['y_pred']
+        self.context.y_prob_mit = results['y_prob']
+        self.context.df_improved = results['df_train_mitigated']
         
-        mit_test_metrics = self.trainer.evaluate(model, X_test, y_test)
-        mit_test_acc = mit_test_metrics.get('Accuracy', 0)
-        
-        if mit_test_acc > 0.95:
-             self.ui.display_message(f"\n[!] CRITICAL WARNING: Extremely high accuracy ({mit_test_acc:.4f}) after mitigation.")
-             self.ui.display_message("    Check for leakage in mitigation strategy or feature selection.")
-
-        self.context.metrics_mitigated.update({f"Val {k}": v for k, v in self.trainer.evaluate(model, X_val, y_val).items()})
-        self.context.metrics_mitigated.update({f"Test {k}": v for k, v in mit_test_metrics.items()})
-        
-        # We need the sensitive attribute for the test set to compute fairness metrics
-        # X_test index should match df_test index (or close enough if no rows dropped in prepare_xy)
-        sens_test = df_test.loc[X_test.index, self.context.sensitive_col]
-        
-        temp_df = X_test.copy(); temp_df[self.context.target_col] = self.context.y_pred_mit; temp_df[self.context.sensitive_col] = sens_test.values
-        
-        # Group Fairness
-        metric_impl = GroupFairnessMetric() if self.context.metric_choice == '1' else ClassificationFairnessMetric(pd.DataFrame({self.context.target_col: y_test.values, self.context.sensitive_col: sens_test.values}))
-        self.context.metrics_mitigated.update(metric_impl.compute(temp_df, self.context.target_col, self.context.sensitive_col, self.context.privileged_group, self.context.unprivileged_group))
+        self.context.metrics_mitigated.update({f"Val {k}": v for k, v in results['train_metrics'].items() if k != 'CV Mean Accuracy' and k != 'CV Std Accuracy'})
+        self.context.metrics_mitigated.update({f"Test {k}": v for k, v in results['test_metrics'].items()})
+        self.context.metrics_mitigated.update(results['fairness_metrics'])
 
         if self.context.df_improved is not None:
             self.context.stats_mitigated = get_comprehensive_stats(self.context.df_improved, self.context.target_col, self.context.sensitive_col, selected_features=self.context.selected_features)
@@ -549,7 +497,7 @@ class WorkflowController:
 
         if self.context.y_test_mit is not None:
             plots["Mitigated Confusion Matrix"] = plot_confusion_matrix(self.context.y_test_mit, self.context.y_pred_mit, "Mitigated Confusion Matrix", "cm_mitigated.png")
-            sens_test_mit = df_display_mit.loc[self.context.y_test_mit.index, self.context.sensitive_col]
+            sens_test_mit = df_display_bl.loc[self.context.y_test_mit.index, self.context.sensitive_col]
             plots["Mitigated Subgroup Confusion Matrices"] = plot_subgroup_confusion_matrices(self.context.y_test_mit.values, self.context.y_pred_mit, sens_test_mit.values, "cm_subgroups_mitigated.png")
             if self.context.y_prob_mit is not None:
                 plots["Mitigated KDE Predicted Probabilities"] = plot_kde_probabilities(self.context.y_prob_mit, sens_test_mit.values, "kde_mitigated.png")

@@ -30,7 +30,7 @@ def get_comprehensive_stats(df, target_col, sensitive_col, original_feat_count=N
     
     # Global target rate
     pos_rate = df[target_col].mean()
-    stats['Global Positive Rate'] = f"{pos_rate:.4f}"
+    stats['Global Positive Rate'] = pos_rate
     
     # Subgroup statistics
     groups = df.groupby(sensitive_col)
@@ -40,7 +40,7 @@ def get_comprehensive_stats(df, target_col, sensitive_col, original_feat_count=N
         group_pos_rate = group[target_col].mean()
         
         stats[f"Group '{name}' Size"] = group_size
-        stats[f"Group '{name}' Pos. Rate"] = f"{group_pos_rate:.4f}"
+        stats[f"Group '{name}' Pos. Rate"] = group_pos_rate
         
     return stats
 

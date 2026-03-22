@@ -134,7 +134,6 @@ class TerminalUI:
 
     def get_sensitive_attributes(self, columns: List[str], default: Optional[str] = None) -> str:
         print_header("Fairness Setup")
-        print("\nEnter sensitive column name(s).")
         print("To analyze intersectional fairness (e.g., Race AND Gender), enter multiple columns separated by commas.")
         return get_user_input("Enter sensitive column name(s)", lambda x: True, default=default)
 
