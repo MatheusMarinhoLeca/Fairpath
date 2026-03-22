@@ -449,7 +449,9 @@ class WorkflowController:
             self.context.model_choice,
             mitigation_strategy=strategy,
             metric_choice=self.context.metric_choice,
-            selected_features=self.context.selected_features
+            selected_features=self.context.selected_features,
+            comparison_mode=self.context.comparison_mode,
+            group_names=self.context.inverse_sensitive_mapping
         )
         
         self.context.y_test_mit = results['y_test']

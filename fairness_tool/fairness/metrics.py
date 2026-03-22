@@ -44,7 +44,18 @@ def _encode_if_needed(df, protected_attribute, privileged_group, unprivileged_gr
 class GroupFairnessMetric(FairnessMetric):
     def compute(self, df: pd.DataFrame, target_col: str, protected_attribute: str, 
                privileged_group: Any, unprivileged_group: Any) -> Dict[str, float]:
-        df_use, priv_val, unpriv_val = _encode_if_needed(df, protected_attribute, privileged_group, unprivileged_group)
+        
+        # Filter DF to only include relevant groups for this specific comparison
+        # This prevents "irrelevant" groups from being pooled into the 0.0 bucket
+        s_prot = ensure_series(df, protected_attribute)
+        if isinstance(unprivileged_group, list):
+            relevant_mask = (s_prot == privileged_group) | (s_prot.isin(unprivileged_group))
+        else:
+            relevant_mask = (s_prot == privileged_group) | (s_prot == unprivileged_group)
+            
+        df_filtered = df[relevant_mask].copy()
+        
+        df_use, priv_val, unpriv_val = _encode_if_needed(df_filtered, protected_attribute, privileged_group, unprivileged_group)
         
         # Ensure target_col is also a series
         s_target = ensure_series(df_use, target_col)
@@ -85,8 +96,18 @@ class ClassificationFairnessMetric(FairnessMetric):
         df_true_clean = self.df_true.reset_index(drop=True)
         df_pred_clean = df_pred.reset_index(drop=True)
         
-        df_true_use, priv_val, unpriv_val = _encode_if_needed(df_true_clean, protected_attribute, privileged_group, unprivileged_group)
-        df_pred_use, _, _ = _encode_if_needed(df_pred_clean, protected_attribute, privileged_group, unprivileged_group)
+        # Filter DFs to only include relevant groups for this specific comparison
+        s_prot = ensure_series(df_true_clean, protected_attribute)
+        if isinstance(unprivileged_group, list):
+            relevant_mask = (s_prot == privileged_group) | (s_prot.isin(unprivileged_group))
+        else:
+            relevant_mask = (s_prot == privileged_group) | (s_prot == unprivileged_group)
+            
+        df_true_filtered = df_true_clean[relevant_mask].copy()
+        df_pred_filtered = df_pred_clean[relevant_mask].copy()
+        
+        df_true_use, priv_val, unpriv_val = _encode_if_needed(df_true_filtered, protected_attribute, privileged_group, unprivileged_group)
+        df_pred_use, _, _ = _encode_if_needed(df_pred_filtered, protected_attribute, privileged_group, unprivileged_group)
 
         # Build clean DataFrames for AIF360 to avoid any duplicate column issues
         df_true_dataset = pd.DataFrame({
