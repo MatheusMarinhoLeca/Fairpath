@@ -78,7 +78,7 @@ graph TD
 The toolkit employs a **Pre-processing Mitigation** approach. It targets bias in the training data distribution before the model is trained.
 
 1.  **Audit Phase:** Computes metrics on the original data split (stratified by target and sensitive attribute).
-2.  **Mitigation Phase:** Applies the selected transformation (e.g., Relabeling) to the **training set only**.
+2.  **Mitigation Phase:** Applies the selected transformation (e.g., Relabeling).
 3.  **Validation Phase:** Evaluates the new model on the **original** (untouched) test set to ensure fairness generalizes to real-world data.
 
 ## ⚠️ Fairness Caveats
