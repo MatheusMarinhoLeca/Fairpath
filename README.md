@@ -49,11 +49,9 @@ graph TD
 
 ## 📖 Core Concepts
 
-### Fairness Metrics
+### Fairness Definitions
 - **Demographic Parity:** Ensures the positive outcome is predicted at equal rates across groups.
 - **Equalized Odds:** Ensures equal True Positive Rates (TPR) and False Positive Rates (FPR) across groups.
-- **Disparate Impact:** A ratio-based parity check (ideal: 1.0).
-- **Statistical Parity Difference:** A difference-based parity check (ideal: 0.0).
 
 ### Mitigation Strategies
 - **Resampling:** Balances the dataset by over/undersampling subgroups to equalize base rates.
