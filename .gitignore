@@ -22,7 +22,7 @@ outputs/logs/
 # Outputs
 outputs/datasets/
 outputs/reports/
-fairness_tool/outputs/
+fairpath/outputs/
 
 # IDEs
 .vscode/

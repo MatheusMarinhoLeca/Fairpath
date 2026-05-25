@@ -1,42 +1,97 @@
-# Fairness Toolkit for Tabular Datasets (CLI)
+# FairPath: Toolkit for Tabular Datasets
 
-This is a command-line tool for analyzing and mitigating bias in tabular datasets.
+A professional command-line interface (CLI) tool for auditing algorithmic bias, applying mitigation strategies, and generating comprehensive fairness reports.
 
-## Setup
+## 🏗 Architecture Overview
+
+The system follows a **Clean Architecture** pattern, ensuring that domain logic is separated from UI and presentation concerns.
+
+```mermaid
+graph TD
+    UI[Terminal UI] --> WC[Workflow Controller]
+    WC --> DS[Data Service]
+    WC --> FS[Fairness Service]
+    WC --> RS[Reporting Service]
+    
+    DS --> PRE[Preprocessing]
+    FS --> MIT[Mitigation Logic]
+    FS --> MET[Fairness Metrics]
+    RS --> PDF[PDF Report Builder]
+```
+
+- **Data Service:** Handles structural integrity, cleaning, and encoding.
+- **Fairness Service:** Orchestrates experiments (Baseline vs. Mitigated).
+- **Reporting Service:** Generates visualizations and decision-support outputs.
+
+## 🚀 Setup
 
 1.  **Install Dependencies:**
-    Ensure you have Python 3.8+ installed. Run the following command to install the required libraries:
+    Ensure you have Python 3.8+ installed. It is recommended to use a virtual environment. You can install the package and its dependencies in editable mode:
 
     ```bash
-    pip install -r fairness_tool/requirements.txt
+    pip install -e .
+    ```
+
+    Alternatively, to install development dependencies:
+    ```bash
+    pip install -e ".[dev]"
     ```
 
 2.  **Run the Application:**
-    Navigate to the project root and run:
-
+    Once installed, you can run the tool directly using the entry point:
     ```bash
-    python fairness_tool/main.py
+    fairpath
+    ```
+    Or manually via python:
+    ```bash
+    python fairpath/main.py
     ```
 
-## Workflow
+## 📖 Core Concepts
 
-1.  **Load Dataset:** Provide the path to your `.csv` or `.xlsx` file.
-2.  **EDA:** View basic statistics and plots (saved in `outputs/reports/assets`).
-3.  **Preprocessing:** Handle missing values, outliers, and encoding interactively.
-4.  **Fairness Setup:** Define sensitive attributes (e.g., Race, Gender) and privileged groups.
-5.  **Baseline Evaluation:** Compute fairness and performance metrics on the original data.
-6.  **Mitigation:** Apply bias mitigation techniques (e.g., Resampling).
-7.  **Post-Evaluation:** Compare metrics after mitigation.
-8.  **Output:** A PDF report and the improved dataset are saved in `outputs/`.
+### Fairness Metrics
+- **Demographic Parity:** Ensures the positive outcome is predicted at equal rates across groups.
+- **Equalized Odds:** Ensures equal True Positive Rates (TPR) and False Positive Rates (FPR) across groups.
+- **Disparate Impact:** A ratio-based parity check (ideal: 1.0).
+- **Statistical Parity Difference:** A difference-based parity check (ideal: 0.0).
 
-## Directory Structure
+### Mitigation Strategies
+- **Resampling:** Balances the dataset by over/undersampling subgroups to equalize base rates.
+- **Relabeling:** Flips labels of individuals near the decision boundary to achieve parity with minimal utility loss.
+- **Synthetic (SMOTE/CDA):** Generates new samples (SMOTE) or counterfactuals (CDA) to force model invariance to sensitive attributes.
 
-*   `fairness_tool/`: Source code.
-*   `fairness_tool/outputs/`: Generated reports, plots, and datasets.
-*   `fairness_tool/config/`: Configuration files.
+## 🛠 Developer Guide
 
-## Recent Improvements
+### Project Structure
+- `fairpath/core/`: Domain services and DTOs (Data Transfer Objects).
+- `fairpath/fairness/`: Core logic for metrics and mitigation algorithms.
+- `fairpath/reporting/`: PDF generation and visualization logic.
+- `fairpath/data/`: Low-level loading and validation utilities.
 
-*   **Robust Evaluation:** Added 5-Fold Stratified Cross-Validation to the model training pipeline.
-*   **Enhanced Metrics:** Included ROC AUC score and weighted F1/Precision/Recall for better handling of imbalanced datasets.
-*   **Overfitting Check:** Improved overfitting detection using Cross-Validation accuracy instead of training accuracy.
+### Adding New Mitigation Strategies
+1. Define a new class in `fairpath/fairness/mitigation.py`.
+2. Inherit from the `MitigationStrategy` interface.
+3. Register the method in the UI or Benchmark engine as needed.
+
+## 📋 Methodology
+
+The toolkit employs a **Pre-processing Mitigation** approach. It targets bias in the training data distribution before the model is trained.
+
+1.  **Audit Phase:** Computes metrics on the original data split (stratified by target and sensitive attribute).
+2.  **Mitigation Phase:** Applies the selected transformation (e.g., Relabeling) to the **training set only**.
+3.  **Validation Phase:** Evaluates the new model on the **original** (untouched) test set to ensure fairness generalizes to real-world data.
+
+## ⚠️ Fairness Caveats
+
+While pre-processing mitigation is a powerful tool for improving algorithmic equity, users should be aware of the following:
+
+*   **Proxy Bias:** Removing a sensitive attribute (e.g., Race) does not guarantee fairness if other features act as strong proxies (e.g., Zip Code). FairPath encourages auditing with multiple related attributes.
+*   **Trade-offs:** Improving fairness often results in a slight decrease in overall predictive accuracy. This "Fairness-Utility Trade-off" is explicitly analyzed in the generated reports.
+*   **Representativeness:** Mitigation strategies like Resampling or Synthetic generation depend on the quality of the original minority group samples. If the original data is too sparse, synthetic samples may not reflect real-world distributions.
+*   **Contextual Necessity:** Fairness is not just a numeric metric. Users should interpret results within the specific legal and social context of their application.
+
+## 📊 Directory Structure
+
+*   `fairpath/`: Source code.
+*   `outputs/`: Generated reports, plots, and datasets (configured in `ReportingService`).
+*   `fairpath/config/`: Default configurations and thresholds.

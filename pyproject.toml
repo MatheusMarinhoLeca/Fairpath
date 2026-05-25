@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fairpath"
+version = "0.1.0"
+description = "A professional CLI tool for auditing algorithmic bias and applying mitigation strategies."
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Matheus de Morais Leca"}
+]
+dependencies = [
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "matplotlib>=3.7.0",
+    "seaborn>=0.12.0",
+    "scikit-learn>=1.2.0",
+    "aif360[AdversarialDebiasing]>=0.6.1",
+    "fairlearn>=0.9.0",
+    "imbalanced-learn>=0.10.0",
+    "tqdm>=4.65.0",
+    "reportlab>=4.0.0",
+    "tabulate>=0.9.0",
+    "openpyxl>=3.1.0",
+    "torch>=2.0.0",
+    "xlrd>=2.0.1"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0"
+]
+
+[project.scripts]
+fairpath = "fairpath.main:main"
+
+[tool.setuptools]
+packages = ["fairpath"]
+package-dir = {"" = "."}
