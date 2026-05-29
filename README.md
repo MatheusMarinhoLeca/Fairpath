@@ -6,22 +6,11 @@ A professional command-line interface (CLI) tool for auditing algorithmic bias, 
 
 The system follows a **Clean Architecture** pattern, ensuring that domain logic is separated from UI and presentation concerns.
 
-```mermaid
-graph TD
-    UI[Terminal UI] --> WC[Workflow Controller]
-    WC --> DS[Data Service]
-    WC --> FS[Fairness Service]
-    WC --> RS[Reporting Service]
-    
-    DS --> PRE[Preprocessing]
-    FS --> MIT[Mitigation Logic]
-    FS --> MET[Fairness Metrics]
-    RS --> PDF[PDF Report Builder]
-```
+![Architecture Diagram](assets/architecture.png)
 
-- **Data Service:** Handles structural integrity, cleaning, and encoding.
-- **Fairness Service:** Orchestrates experiments (Baseline vs. Mitigated).
-- **Reporting Service:** Generates visualizations and decision-support outputs.
+- **Data Module:** Handles structural integrity, cleaning, and encoding.
+- **Fairness Module:** Orchestrates experiments (Baseline vs. Mitigated).
+- **Report Module:** Generates visualizations and decision-support outputs.
 
 ## 🚀 Setup
 
