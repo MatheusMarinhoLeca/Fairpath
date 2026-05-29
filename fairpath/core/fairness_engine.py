@@ -1,5 +1,5 @@
 import pandas as pd
-from typing import Optional, List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any
 from fairpath.core.models import (
     PreprocessingConfig, FairnessConfig, ExperimentResult, AuditReportData
 )

@@ -1,8 +1,7 @@
 from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
 from sklearn.preprocessing import StandardScaler, Normalizer
 import pandas as pd
-import numpy as np
-from typing import Dict, Any, Tuple
+from typing import Dict
 from fairpath.core.interfaces import ModelTrainer
 from fairpath.evaluation.performance import evaluate_classification
 from .factory import ModelFactory

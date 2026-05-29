@@ -1,17 +1,11 @@
 import pandas as pd
 import numpy as np
-import warnings
-import logging
 import os
-import sys
 import contextlib
 from imblearn.over_sampling import SMOTE
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler, Normalizer
-from sdv.single_table import GaussianCopulaSynthesizer
-from sdv.metadata import Metadata
-from sdv.sampling import Condition
-from typing import Any, List, Optional, Tuple, Dict
+from typing import Any, List, Optional, Tuple
 from fairpath.core.interfaces import MitigationStrategy
 from fairpath.data.utils import ensure_series
 from fairpath.preprocessing.missing_values import impute_missing

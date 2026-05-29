@@ -1,6 +1,5 @@
 import pandas as pd
-import numpy as np
-from typing import List, Tuple, Any, Optional, Dict
+from typing import List, Tuple, Any, Optional
 from fairpath.preprocessing.missing_values import impute_missing
 from fairpath.preprocessing.outliers import remove_outliers_iqr
 from fairpath.preprocessing.encoding import one_hot_encode, label_encode

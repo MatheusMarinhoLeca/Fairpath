@@ -1,4 +1,4 @@
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 import pandas as pd
 from fairpath.core.experiment import ExperimentRunner
 from fairpath.core.models import FairnessConfig, ExperimentResult

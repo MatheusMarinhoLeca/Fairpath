@@ -1,6 +1,5 @@
 from typing import List, Dict, Any
 from fairpath.core.models import Recommendation
-from fairpath.utils.statistics import StatisticalValidator
 
 class RecommendationService:
     """Generates adaptive, evidence-based fairness recommendations grounded in statistical analysis."""

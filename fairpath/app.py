@@ -1,4 +1,3 @@
-import warnings
 from fairpath.utils.warnings_config import configure_warnings
 configure_warnings()
 

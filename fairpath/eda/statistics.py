@@ -1,6 +1,3 @@
-import pandas as pd
-import numpy as np
-
 def get_basic_stats(df):
     stats = {
         'Total Samples': df.shape[0],

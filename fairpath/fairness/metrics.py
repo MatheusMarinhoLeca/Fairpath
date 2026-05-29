@@ -1,5 +1,5 @@
 from aif360.datasets import BinaryLabelDataset
-from aif360.metrics import BinaryLabelDatasetMetric, ClassificationMetric, DatasetMetric
+from aif360.metrics import BinaryLabelDatasetMetric, ClassificationMetric
 import pandas as pd
 import numpy as np
 from typing import Dict, Any, Union, List, Tuple

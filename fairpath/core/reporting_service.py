@@ -1,7 +1,7 @@
 import os
 import pandas as pd
-from typing import Dict, Any, List, Optional
-from fairpath.core.models import AuditReportData, ExperimentResult
+from typing import Dict
+from fairpath.core.models import AuditReportData
 from fairpath.reporting.report_builder import generate_pdf_report
 from fairpath.eda.visualizations import (
     plot_confusion_matrix, plot_subgroup_confusion_matrices,

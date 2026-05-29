@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 from typing import Dict, Any, Tuple, Optional, List
 from fairpath.models.classification import DefaultModelTrainer
 from fairpath.fairness.metrics import GroupFairnessMetric, ClassificationFairnessMetric

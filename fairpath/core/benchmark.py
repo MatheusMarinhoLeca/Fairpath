@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 import os
 import itertools
 import time
@@ -9,14 +8,9 @@ from joblib import Parallel, delayed
 from tqdm import tqdm
 
 from aif360.sklearn.datasets import fetch_adult, fetch_compas, fetch_german
-from fairpath.preprocessing.missing_values import impute_missing
-from fairpath.preprocessing.outliers import remove_outliers_iqr
-from fairpath.preprocessing.encoding import one_hot_encode, label_encode, binarize_attribute
 from fairpath.models.classification import DefaultModelTrainer
 from fairpath.core.experiment import ExperimentRunner
-from fairpath.fairness.mitigation import ResamplingMitigation, RelabelingMitigation, SyntheticMitigation
-from fairpath.data import create_composite_attribute
-from fairpath.data.validator import check_duplicates
+from fairpath.fairness.mitigation import RelabelingMitigation, SyntheticMitigation
 
 from fairpath.utils.warnings_config import configure_warnings
 configure_warnings()

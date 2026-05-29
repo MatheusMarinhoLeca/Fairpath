@@ -2,7 +2,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, HistGradientBoostingClassifier
 from sklearn.svm import LinearSVC
 from sklearn.calibration import CalibratedClassifierCV
-from typing import Dict, Any, Callable, Type
+from typing import Dict, Any, Callable
 
 class ModelFactory:
     """Factory for creating and registering machine learning models."""

@@ -1,6 +1,5 @@
 import pandas as pd
-import numpy as np
-from typing import Dict, List, Any, Tuple
+from typing import Dict, Tuple
 
 class BenchmarkAnalyzer:
     """Analyzes benchmark results to identify interesting patterns and outliers."""

@@ -4,7 +4,6 @@ from fairpath.data import (
     load_dataset, handle_duplicate_columns, infer_numeric_types, 
     validate_dataset, create_composite_attribute, binarize_attribute
 )
-from fairpath.data.validator import check_duplicates
 from fairpath.eda.statistics import get_basic_stats, get_comprehensive_stats
 from fairpath.preprocessing.missing_values import impute_missing
 from fairpath.preprocessing.outliers import OutlierRemover

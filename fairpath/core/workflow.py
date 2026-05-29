@@ -1,6 +1,4 @@
 import os
-import pandas as pd
-import numpy as np
 from fairpath.core.context import ProjectContext
 from fairpath.ui.terminal import TerminalUI
 from fairpath.utils.logging import log_action
@@ -16,7 +14,7 @@ from fairpath.core.reporting_service import ReportingService
 from fairpath.core.preprocessing_service import PreprocessingService
 from fairpath.core.fairness_engine import FairnessEngine
 from fairpath.core.models import (
-    PreprocessingConfig, FairnessConfig, ExperimentResult, AuditReportData
+    PreprocessingConfig, FairnessConfig, AuditReportData
 )
 from fairpath.config.defaults import POTENTIAL_SENSITIVE_ATTRIBUTES, DEFAULT_PRIORITY_SENSITIVE
 from fairpath.fairness.mitigation import ResamplingMitigation, RelabelingMitigation, SyntheticMitigation

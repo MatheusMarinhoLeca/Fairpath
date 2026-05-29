@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import sys
-import os
 
 # To run this test: PYTHONPATH=fairpath python3 fairpath/tests/test_svm_integration.py
 
