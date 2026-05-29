@@ -19,7 +19,6 @@ dependencies = [
     "seaborn>=0.12.0",
     "scikit-learn>=1.2.0",
     "aif360[AdversarialDebiasing]>=0.6.1",
-    "fairlearn>=0.9.0",
     "imbalanced-learn>=0.10.0",
     "tqdm>=4.65.0",
     "reportlab>=4.0.0",
