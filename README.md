@@ -49,11 +49,9 @@ graph TD
 
 ## 📖 Core Concepts
 
-### Fairness Metrics
+### Fairness Definitions
 - **Demographic Parity:** Ensures the positive outcome is predicted at equal rates across groups.
 - **Equalized Odds:** Ensures equal True Positive Rates (TPR) and False Positive Rates (FPR) across groups.
-- **Disparate Impact:** A ratio-based parity check (ideal: 1.0).
-- **Statistical Parity Difference:** A difference-based parity check (ideal: 0.0).
 
 ### Mitigation Strategies
 - **Resampling:** Balances the dataset by over/undersampling subgroups to equalize base rates.
@@ -78,7 +76,7 @@ graph TD
 The toolkit employs a **Pre-processing Mitigation** approach. It targets bias in the training data distribution before the model is trained.
 
 1.  **Audit Phase:** Computes metrics on the original data split (stratified by target and sensitive attribute).
-2.  **Mitigation Phase:** Applies the selected transformation (e.g., Relabeling) to the **training set only**.
+2.  **Mitigation Phase:** Applies the selected transformation (e.g., Relabeling).
 3.  **Validation Phase:** Evaluates the new model on the **original** (untouched) test set to ensure fairness generalizes to real-world data.
 
 ## ⚠️ Fairness Caveats
