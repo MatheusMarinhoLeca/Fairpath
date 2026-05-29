@@ -4,8 +4,6 @@ A professional command-line interface (CLI) tool for auditing algorithmic bias, 
 
 ## 🏗 Architecture Overview
 
-The system follows a **Clean Architecture** pattern, ensuring that domain logic is separated from UI and presentation concerns.
-
 ![Architecture Diagram](assets/architecture.png)
 
 - **Data Module:** Handles structural integrity, cleaning, and encoding.
